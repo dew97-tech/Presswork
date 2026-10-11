@@ -54,6 +54,7 @@ next-env.d.ts
 !README.md
 !DEPLOYMENT.md
 !DESIGN.md
+/plans/
 /opencode.json
 /.opencode/
 /skills-lock.json

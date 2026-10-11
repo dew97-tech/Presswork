@@ -2,6 +2,7 @@
 
 import { createPost, updatePost } from "@/app/lib/admin-actions";
 import { discardUploadedBlob } from "@/app/lib/blob-actions";
+import { useToast } from "@/components/ui/toast";
 import { upload } from "@vercel/blob/client";
 import {
   ArrowSquareOut,
@@ -32,6 +33,7 @@ interface EditablePost {
 }
 
 export default function PostForm({ post }: { post?: EditablePost }) {
+  const { toast } = useToast();
   const [title, setTitle] = useState(post?.title || "");
   const [slug, setSlug] = useState(post?.slug || "");
   const [description, setDescription] = useState(post?.description || "");
@@ -44,7 +46,6 @@ export default function PostForm({ post }: { post?: EditablePost }) {
   );
   const [tagInput, setTagInput] = useState("");
   const [isUploading, setIsUploading] = useState(false);
-  const [uploadError, setUploadError] = useState("");
   const inputFileRef = useRef<HTMLInputElement>(null);
 
   const generateSlug = (text: string) => {
@@ -92,7 +93,6 @@ export default function PostForm({ post }: { post?: EditablePost }) {
     const file = event.target.files[0];
     const previousUrl = thumbnailUrl;
     setIsUploading(true);
-    setUploadError("");
 
     try {
       const newBlob = await upload(file.name, file, {
@@ -105,8 +105,15 @@ export default function PostForm({ post }: { post?: EditablePost }) {
       }
     } catch (error) {
       console.error("Upload failed:", error);
-      const message = error instanceof Error ? error.message : "Upload failed";
-      setUploadError(`${message}. Paste an image URL instead.`);
+      const raw = error instanceof Error ? error.message : "Upload failed";
+      const message = /access denied|valid token/i.test(raw)
+        ? "The Blob store rejected the upload token. Ask the site owner to rotate BLOB_READ_WRITE_TOKEN"
+        : raw;
+      toast({
+        variant: "error",
+        label: "Upload failed",
+        title: `${message}. Paste an image URL instead.`,
+      });
     } finally {
       setIsUploading(false);
       event.target.value = "";
@@ -368,11 +375,6 @@ export default function PostForm({ post }: { post?: EditablePost }) {
                   spellCheck={false}
                   className="w-full rounded border border-input bg-surface px-3 py-1.5 font-mono text-[13px] text-ink-muted"
                 />
-                {uploadError && (
-                  <p role="alert" className="text-[13px] text-danger">
-                    {uploadError}
-                  </p>
-                )}
               </div>
             )}
 

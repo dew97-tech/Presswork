@@ -1,6 +1,7 @@
 "use client";
 
 import { generateImagePrompt } from "@/app/lib/admin-actions";
+import { useToast } from "@/components/ui/toast";
 import { Check, CircleNotch, CopySimple, Sparkle } from "@phosphor-icons/react";
 import { useState, useTransition } from "react";
 
@@ -19,13 +20,12 @@ export default function ImagePromptPanel({
   tags: string[];
   content: string;
 }) {
+  const { toast } = useToast();
   const [prompt, setPrompt] = useState("");
-  const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
   const [pending, startTransition] = useTransition();
 
   const handleGenerate = () => {
-    setError("");
     setCopied(false);
 
     startTransition(async () => {
@@ -43,13 +43,22 @@ export default function ImagePromptPanel({
         return;
       }
 
-      setError(state.message ?? "Could not generate a prompt");
+      toast({
+        variant: "error",
+        label: "Prompt generation failed",
+        title: state.message ?? "Could not generate a prompt.",
+      });
     });
   };
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(prompt);
     setCopied(true);
+    toast({
+      variant: "success",
+      label: "Copied",
+      title: "Prompt copied to the clipboard.",
+    });
   };
 
   return (
@@ -76,12 +85,6 @@ export default function ImagePromptPanel({
           </span>
         </button>
       </div>
-
-      {error ? (
-        <p role="alert" className="text-[13px] text-danger">
-          {error}
-        </p>
-      ) : null}
 
       {prompt ? (
         <div className="space-y-3 rounded border border-border bg-surface p-3">

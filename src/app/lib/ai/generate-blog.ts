@@ -2,21 +2,30 @@ import sanitizeHtml from "sanitize-html";
 import { z } from "zod";
 import { fetchSearchQueries } from "@/app/lib/google/search-console";
 import prisma from "@/app/lib/prisma";
-import { buildBlogMessages } from "./blog-prompt";
+import { getGenerationSettings } from "@/app/lib/settings";
+import { buildGenerationContext } from "./blog-prompt";
+import { callModel } from "./call-model";
 import { MAX_AUTO_DRAFTS } from "./constants";
 import { buildKeywordCandidates } from "./keywords";
+import { DEFAULT_GENERATION_CHAIN, getModel, type GoModel } from "./models";
 import {
-  chatCompletion,
   extractJsonObject,
-  GO_MODELS,
   type ChatCompletionResult,
   type ChatMessage,
 } from "./opencode-go";
+import {
+  getPrompt,
+  PROMPT_KEYS,
+  PROMPT_REGISTRY,
+  renderPrompt,
+} from "./prompts";
 import { CURATED_TOPICS, fetchTrends, isBannedTopic, type TrendItem } from "./trends";
 
 const RUNNING_LOCK_MINUTES = 15;
 
-const MAX_TOTAL_GENERATION_MS = 215_000;
+const MAX_TOTAL_GENERATION_MS = 260_000;
+const GENERATION_REQUEST_TIMEOUT_MS = 120_000;
+const GENERATION_MAX_TOKENS = 6000;
 const MIN_WORD_COUNT = 900;
 const MAX_WORD_COUNT = 2_600;
 const MAX_TITLE_SIMILARITY = 0.6;
@@ -28,7 +37,7 @@ const REQUIRED_SECONDARY_KEYWORDS = 4;
 const MAX_TAG_WORDS = 3;
 const MAX_TAGS = 4;
 
-const BANNED_PHRASES = [
+export const BANNED_PHRASES = [
   "in today's fast-paced",
   "in this article",
   "delve into",
@@ -136,7 +145,7 @@ const STOP_WORDS = new Set([
   "ultimate",
 ]);
 
-function stripHtml(html: string): string {
+export function stripHtml(html: string): string {
   return html
     .replace(/<[^>]+>/g, " ")
     .replace(/&[a-z#0-9]+;/gi, " ")
@@ -183,7 +192,7 @@ function titleSimilarity(a: string, b: string): number {
 const EM_DASH = String.fromCharCode(0x2014);
 const EN_DASH = String.fromCharCode(0x2013);
 
-function normalizeDashes(text: string): string {
+export function normalizeDashes(text: string): string {
   return text
     .replaceAll(` ${EM_DASH} `, ", ")
     .replaceAll(` ${EN_DASH} `, ", ")
@@ -191,7 +200,7 @@ function normalizeDashes(text: string): string {
     .replaceAll(EN_DASH, "-");
 }
 
-function sanitizeGeneratedHtml(html: string): string {
+export function sanitizeGeneratedHtml(html: string): string {
   const clean = sanitizeHtml(html, {
     allowedTags: [
       "h2",
@@ -242,7 +251,7 @@ function sanitizeGeneratedHtml(html: string): string {
   return normalizeDashes(clean);
 }
 
-function clampDescription(value: string, max = 158): string {
+export function clampDescription(value: string, max = 158): string {
   const text = value.trim();
   if (text.length <= max) return text;
 
@@ -264,6 +273,7 @@ function validateDraft(
   existingTitles: string[],
   usedKeywords: Set<string>,
   publishedSlugs: Set<string>,
+  forcedKeyword: string | null = null,
 ): ValidatedDraft {
   const parsed = DraftSchema.parse(raw);
   const normalizedTitle = normalizeDashes(parsed.title);
@@ -386,7 +396,13 @@ function validateDraft(
     throw new Error(`Title is too similar to an existing post: "${similarTitle}"`);
   }
 
-  if (usedKeywords.has(primaryKeyword)) {
+  if (forcedKeyword) {
+    if (primaryKeyword !== forcedKeyword.toLowerCase()) {
+      throw new Error(
+        `Primary keyword must be exactly "${forcedKeyword}"; received "${primaryKeyword}"`,
+      );
+    }
+  } else if (usedKeywords.has(primaryKeyword)) {
     throw new Error(`Primary keyword "${primaryKeyword}" was already used recently`);
   }
 
@@ -428,13 +444,14 @@ function normalizeTitle(value: string): string {
 }
 
 async function generateForModel(
-  model: (typeof GO_MODELS)[number],
+  model: GoModel,
   messages: ChatMessage[],
   sessionId: string,
   existingTitles: string[],
   usedKeywords: Set<string>,
   publishedSlugs: Set<string>,
   deadline: number,
+  forcedKeyword: string | null = null,
 ): Promise<{ draft: ValidatedDraft; result: ChatCompletionResult }> {
   let attemptMessages = messages;
   let lastError: unknown;
@@ -444,13 +461,14 @@ async function generateForModel(
       throw new Error("Generation deadline exceeded during self-repair");
     }
 
-    const result = await chatCompletion({
-      model: model.id,
+    const result = await callModel({
+      modelId: model.id,
       messages: attemptMessages,
       sessionId,
       temperature: 0.7,
-      maxTokens: model.maxTokens,
-      reasoningEffort: model.reasoningEffort,
+      maxTokens: GENERATION_MAX_TOKENS,
+      reasoningEffort: "none",
+      timeoutMs: GENERATION_REQUEST_TIMEOUT_MS,
     });
 
     try {
@@ -459,6 +477,7 @@ async function generateForModel(
         existingTitles,
         usedKeywords,
         publishedSlugs,
+        forcedKeyword,
       );
       return { draft, result };
     } catch (error) {
@@ -483,7 +502,7 @@ async function generateForModel(
 }
 
 export async function runBlogGeneration(
-  options: { force?: boolean } = {},
+  options: { force?: boolean; keywordId?: string } = {},
 ): Promise<GenerationResult> {
   const startedAt = Date.now();
   const sessionId = `portfolio-blog-${new Date().toISOString()}`;
@@ -502,6 +521,21 @@ export async function runBlogGeneration(
       reason: "already_running",
       detail: `Another generation run started at ${activeRun.startedAt.toISOString()}; lock window is ${RUNNING_LOCK_MINUTES} minutes`,
     };
+  }
+
+  let forcedKeyword: string | null = null;
+  if (options.keywordId) {
+    const keywordRow = await prisma.keyword.findUnique({
+      where: { id: options.keywordId },
+      select: { keyword: true },
+    });
+    if (!keywordRow) {
+      return {
+        status: "failed",
+        error: `Keyword "${options.keywordId}" was not found. Reload the keywords page and try again.`,
+      };
+    }
+    forcedKeyword = keywordRow.keyword;
   }
 
   const draftCount = await prisma.post.count({
@@ -573,26 +607,29 @@ export async function runBlogGeneration(
         .map(normalizeTitle),
     );
 
+    const keywordSeed: TrendItem | null = forcedKeyword
+      ? { title: forcedKeyword, url: "", source: "keyword planner" }
+      : null;
+
     const seedPool = liveTrends.length > 0 ? liveTrends : CURATED_TOPICS;
-    const available = seedPool.filter((seed) => {
-      const title = normalizeTitle(seed.title);
-      return !recentTitles.has(title) && !recentTopics.has(title) && !usedTopics.has(title);
-    });
+    const available = keywordSeed
+      ? [keywordSeed]
+      : seedPool.filter((seed) => {
+          const title = normalizeTitle(seed.title);
+          return (
+            !recentTitles.has(title) &&
+            !recentTopics.has(title) &&
+            !usedTopics.has(title)
+          );
+        });
 
     const signals = (available.length > 0 ? available : CURATED_TOPICS).slice(0, 18);
 
     const keywordCandidates = await buildKeywordCandidates(
-      signals.slice(0, 3).map((signal) => signal.title),
+      forcedKeyword
+        ? [forcedKeyword]
+        : signals.slice(0, 3).map((signal) => signal.title),
     ).catch(() => ({ keywords: [] as string[], categories: [] as string[] }));
-
-    const messages = buildBlogMessages({
-      trends: signals,
-      recentPosts,
-      today: new Date(),
-      keywordCandidates: keywordCandidates.keywords,
-      categories: keywordCandidates.categories,
-      searchQueries,
-    });
 
     const existingTitles = recentPosts.map((post) => post.title);
     const usedKeywords = new Set(
@@ -600,13 +637,45 @@ export async function runBlogGeneration(
         .map((post) => post.keywords[0]?.toLowerCase())
         .filter((keyword): keyword is string => Boolean(keyword)),
     );
+    if (forcedKeyword) {
+      usedKeywords.delete(forcedKeyword.toLowerCase());
+    }
+
+    const availableKeywords = keywordCandidates.keywords.filter(
+      (keyword) => !usedKeywords.has(keyword.toLowerCase()),
+    );
+    const promptKeywords = forcedKeyword
+      ? Array.from(new Set([forcedKeyword, ...availableKeywords])).slice(0, 12)
+      : availableKeywords.length >= 12
+        ? availableKeywords
+        : keywordCandidates.keywords;
+
+    const generationPrompt = await getPrompt(PROMPT_KEYS.generation);
+    const generationContext = buildGenerationContext({
+      trends: signals,
+      recentPosts,
+      today: new Date(),
+      keywordCandidates: promptKeywords,
+      categories: keywordCandidates.categories,
+      searchQueries,
+      usedKeywords: Array.from(usedKeywords),
+      forcedKeyword: forcedKeyword ?? undefined,
+    });
+    const messages = renderPrompt(
+      PROMPT_REGISTRY[PROMPT_KEYS.generation],
+      generationPrompt,
+      generationContext,
+    );
 
     let lastError: unknown;
     let lastModel: string | undefined;
     const modelErrors: string[] = [];
     const structuredErrors: { model: string; message: string }[] = [];
 
-    for (const model of GO_MODELS) {
+    const { chain } = await getGenerationSettings();
+    const modelChain = chain.length > 0 ? chain : DEFAULT_GENERATION_CHAIN;
+
+    for (const selection of modelChain) {
       if (Date.now() - startedAt > MAX_TOTAL_GENERATION_MS) {
         lastError = new Error("Generation deadline exceeded before all models were tried");
         structuredErrors.push({
@@ -614,6 +683,15 @@ export async function runBlogGeneration(
           message: "Generation deadline exceeded before all models were tried",
         });
         break;
+      }
+
+      const model = getModel(selection.modelId);
+      if (!model) {
+        lastModel = selection.modelId;
+        const message = `Unknown model id "${selection.modelId}"`;
+        modelErrors.push(`${selection.modelId}: ${message}`);
+        structuredErrors.push({ model: selection.modelId, message });
+        continue;
       }
 
       try {
@@ -625,6 +703,7 @@ export async function runBlogGeneration(
           usedKeywords,
           publishedSlugs,
           startedAt + MAX_TOTAL_GENERATION_MS,
+          forcedKeyword,
         );
 
         const slug = await ensureUniqueSlug(draft.slug);
@@ -647,6 +726,13 @@ export async function runBlogGeneration(
           },
         });
 
+        if (options.keywordId && forcedKeyword) {
+          await prisma.keyword.update({
+            where: { id: options.keywordId },
+            data: { status: "used", postId: post.id, usedAt: new Date() },
+          });
+        }
+
         await prisma.generationRun
           .update({
             where: { id: run.id },
@@ -654,7 +740,7 @@ export async function runBlogGeneration(
               status: "success",
               finishedAt: new Date(),
               model: model.id,
-              topic: draft.topic,
+              topic: forcedKeyword ?? draft.topic,
               postId: post.id,
               cost: result.cost ?? null,
               inputTokens: result.inputTokens ?? null,
@@ -670,7 +756,7 @@ export async function runBlogGeneration(
           postId: post.id,
           slug,
           model: model.id,
-          topic: draft.topic,
+          topic: forcedKeyword ?? draft.topic,
           primaryKeyword: draft.primaryKeyword,
           wordCount: draft.wordCount,
           cost: result.cost,

@@ -7,6 +7,10 @@ import { usePathname } from "next/navigation";
 const items = [
   { name: "Articles", href: "/admin" },
   { name: "New post", href: "/admin/new" },
+  { name: "AI settings", href: "/admin/settings" },
+  { name: "Prompts", href: "/admin/prompts" },
+  { name: "Search Console", href: "/admin/search-console" },
+  { name: "Keywords", href: "/admin/keywords" },
 ];
 
 export default function AdminNav() {

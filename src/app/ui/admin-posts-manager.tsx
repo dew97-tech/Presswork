@@ -2,6 +2,7 @@
 
 import DeletePostButton from "@/app/ui/delete-post-button";
 import GeneratePostButton from "@/app/ui/generate-post-button";
+import { getModel } from "@/app/lib/ai/models";
 import { cn } from "@/lib/utils";
 import { Eye, MagnifyingGlass, PencilSimple, Plus } from "@phosphor-icons/react";
 import Image from "next/image";
@@ -203,7 +204,10 @@ export default function AdminPostsManager({
                                 className="font-mono text-[11px] text-ink-faint"
                                 title={`AI draft${post.aiModel ? ` (${post.aiModel})` : ""}`}
                               >
-                                AI{post.aiModel ? ` (${post.aiModel})` : ""}
+                                AI
+                                {post.aiModel
+                                  ? ` (${getModel(post.aiModel)?.label ?? post.aiModel})`
+                                  : ""}
                               </span>
                             )}
                             {post.keywords && post.keywords.length > 0 && (

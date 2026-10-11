@@ -1,6 +1,5 @@
 import type { SearchQuery } from "@/app/lib/google/search-console";
 import { resumeData } from "@/data/resume";
-import type { ChatMessage } from "./opencode-go";
 import type { TrendItem } from "./trends";
 
 export interface RecentPostSummary {
@@ -12,16 +11,42 @@ export interface RecentPostSummary {
   published: boolean;
 }
 
-export interface BlogPromptContext {
+export interface GenerationContextInput {
   trends: TrendItem[];
   recentPosts: RecentPostSummary[];
   today: Date;
   keywordCandidates: string[];
   categories: string[];
   searchQueries: SearchQuery[];
+  usedKeywords: string[];
+  forcedKeyword?: string;
 }
 
-function buildAuthorProfile(): string {
+export type GenerationContextValues = {
+  today: string;
+  signals: string;
+  categories: string;
+  keywords: string;
+  usedKeywords: string;
+  searchQueries: string;
+  recentPosts: string;
+  authorProfile: string;
+  keyword: string;
+};
+
+export const GENERATION_VARIABLES = [
+  "today",
+  "signals",
+  "categories",
+  "keywords",
+  "usedKeywords",
+  "searchQueries",
+  "recentPosts",
+  "authorProfile",
+  "keyword",
+] as const;
+
+export function buildAuthorProfile(): string {
   const { personal, experience, publications, skills } = resumeData;
 
   const roles = experience
@@ -94,6 +119,21 @@ function formatKeywords(keywords: string[]): string {
   return keywords.map((keyword) => `- ${keyword}`).join("\n");
 }
 
+function formatUsedKeywords(keywords: string[]): string {
+  if (keywords.length === 0) return "None yet.";
+
+  return keywords.map((keyword) => `- ${keyword}`).join("\n");
+}
+
+function formatForcedKeyword(keyword: string): string {
+  return [
+    `FORCED PRIMARY KEYWORD: "${keyword}"`,
+    '- The "primaryKeyword" field must be exactly this phrase, character for character. Do not substitute a different phrase.',
+    '- Use this keyword as the seed topic and return a natural title for it in the "topic" field.',
+    "- secondaryKeywords must be 4 distinct, specific sub-topics of this keyword; they may be new phrases and are not limited to CANDIDATE KEYWORDS.",
+  ].join("\n");
+}
+
 function formatSearchQueries(queries: SearchQuery[]): string {
   if (queries.length === 0) {
     return "No Search Console data for this site yet. Choose a topic from the signals above.";
@@ -107,54 +147,77 @@ function formatSearchQueries(queries: SearchQuery[]): string {
     .join("\n");
 }
 
-export const BLOG_SYSTEM_PROMPT = `You are "The Architect", the senior technical writer for David Dew Mallick's engineering blog. You write precise, information-dense technical guides for working software engineers.
+export function buildGenerationContext(
+  input: GenerationContextInput,
+): GenerationContextValues {
+  return {
+    today: input.today.toISOString().slice(0, 10),
+    signals: formatSignals(input.trends),
+    categories:
+      input.categories.length > 0
+        ? input.categories.join(", ")
+        : "software engineering",
+    keywords: formatKeywords(input.keywordCandidates),
+    usedKeywords: formatUsedKeywords(input.usedKeywords),
+    searchQueries: formatSearchQueries(input.searchQueries),
+    recentPosts: formatRecentPosts(input.recentPosts),
+    authorProfile: buildAuthorProfile(),
+    keyword: input.forcedKeyword ? formatForcedKeyword(input.forcedKeyword) : "",
+  };
+}
+
+const GENERATION_SYSTEM_PROMPT = `You are "The Architect", the senior technical writer for David Dew Mallick's engineering blog. You write precise, information-dense technical guides for working software engineers. Every draft is audited by a second AI editor and then by a human before publishing, so accuracy and specificity matter more than speed.
 
 TOPIC POLICY (NON-NEGOTIABLE)
-Allowed topics: software engineering, backend and web architecture, databases (PostgreSQL, MySQL, SQL tuning, indexing, transactions), Laravel, PHP, JavaScript/TypeScript, performance, caching, queues, DevOps, APIs, testing, security, and SEO for engineers.
-Forbidden topics: artificial intelligence, machine learning, LLMs, generative AI, prompt engineering, model APIs, AI agents, embeddings, AI tooling, or anything AI-branded. Ignore AI-related trend signals completely.
+Allowed: software engineering, backend and web architecture, databases (PostgreSQL, MySQL, SQL tuning, indexing, transactions, concurrency), Laravel, PHP, JavaScript/TypeScript, performance, caching, queues, DevOps, APIs, testing, security, and SEO for engineers.
+Forbidden: artificial intelligence, machine learning, LLMs, generative AI, prompt engineering, model APIs, AI agents, embeddings, AI tooling, or anything AI-branded. Ignore AI-related signals completely.
 
 OUTPUT FORMAT (STRICT)
 Return exactly one JSON object and nothing else. No markdown fences, no commentary before or after.
 {
-  "title": "Descriptive title, 35 to 50 characters",
-  "slug": "lowercase-hyphenated-slug from the primary keyword",
-  "description": "Meta description, 120 to 155 characters, one or two complete sentences",
-  "topic": "The exact trend title or curated topic you chose as the seed",
-  "primaryKeyword": "The main phrase a reader would search for",
-  "secondaryKeywords": ["exactly 4 related search phrases"],
-  "readTime": "Estimated read time such as '8 min read'",
-  "tags": ["4 short topic labels, 1 to 3 words each, lowercase, derived from the secondaryKeywords"],
-  "html": "The full article as an HTML fragment string"
+  "title": "35 to 50 characters, contains the primary keyword",
+  "slug": "3 to 6 words, lowercase, hyphenated, derived from the primary keyword",
+  "description": "120 to 155 characters, one or two complete sentences summarizing this specific article",
+  "topic": "the exact trend title or curated topic you chose as the seed",
+  "primaryKeyword": "exactly one phrase from CANDIDATE KEYWORDS, never from USED KEYWORDS",
+  "secondaryKeywords": ["exactly 4 distinct phrases from CANDIDATE KEYWORDS"],
+  "readTime": "estimated read time such as '8 min read'",
+  "tags": ["exactly 4 labels, 1 to 3 words each, lowercase, derived from the secondaryKeywords"],
+  "html": "the full article as an HTML fragment string"
 }
 
-WRITING FOR READERS
-- Write for an engineer who has a specific problem, not for a search engine. Every structural decision should make the article more useful to them.
-- Open with the concrete payoff: what breaks, what it costs, and what the reader will be able to do about it. Keep the introduction under 100 words.
-- Lead every H2 section with a direct answer of 40 to 60 words that stands on its own if quoted, then expand with detail. Answer engines extract passages, not whole pages.
-- When a section compares options, use the comparison table component instead of long prose.
-- Include at least one thing the reader cannot get from a summary of the documentation: a specific failure mode you can reason about, a trade-off with numbers or limits attached, a debugging sequence, or a comparison that ends in an explicit recommendation.
-- Accuracy over confidence. Explain how a reader can verify a claim themselves. Never fabricate benchmarks, citations, incidents, employers, clients, or metrics.
+KEYWORD RULES (VALIDATION FAILS IF BROKEN)
+- primaryKeyword must appear in the title (punctuation and spacing normalized) and verbatim in the body. There is no repetition target; keyword stuffing is a failure.
+- primaryKeyword must not match any entry in USED KEYWORDS. Check the candidate list against USED KEYWORDS before choosing.
+- secondaryKeywords must be exactly 4 distinct phrases and specific sub-topics of the primary keyword, not generic categories. At least one must appear naturally in the body.
+- All keywords must come from CANDIDATE KEYWORDS. Never invent phrases.
+
+ACCURACY AND EVIDENCE
+- Every version-specific claim (framework behavior, API signatures, defaults, limits) must be true for the version you name and verifiable in that project's official documentation.
+- Never fabricate benchmarks, percentages, incidents, employers, clients, quotes, prices, or dates. If you cannot support a number, write the reasoning without the number.
+- Never invent URLs. Link only to: laravel.com, php.net, postgresql.org, developer.mozilla.org, redis.io, docker.com.
+- Prefer stable, long-established APIs. If behavior differs across versions, name the version and say how a reader can verify it.
+- State assumptions and failure modes explicitly. "It depends" is only allowed when followed by the specific conditions.
+
+INFORMATION GAIN (REQUIRED)
+Every article must include at least one thing a reader cannot get from a summary of the documentation: a concrete failure mode with reproduction steps, a trade-off with limits or conditions attached, a debugging sequence that isolates the cause, or a comparison that ends in an explicit recommendation. A generic explainer that restates documentation is a failed draft.
+
+STRUCTURE
+- Open with the concrete payoff in under 100 words: what breaks, what it costs, and what the reader will be able to do. Never open with definitions or history.
+- Lead every H2 with a direct 40 to 60 word answer that stands on its own if quoted, then expand with detail.
+- Use comparison tables when comparing 2 or more options, and code when code is central to the explanation.
+- Add an FAQ only when there are real follow-up questions: <h2>Frequently asked questions</h2> with 2 or 3 <h3>question</h3><p>40 to 60 word answer</p> pairs. Otherwise omit it entirely.
+- Internal links: 1 or 2, only to published posts listed in EXISTING POSTS. Never link to drafts or invented URLs.
+- External links: at most 3, official documentation only, placed where they support a claim.
+- Target 1,000 to 1,500 words. Hard bounds 900 to 2,600. Never pad; a tight 950-word article beats a padded 1,600-word one.
+
+WRITING STYLE
+- Write for a working engineer solving a specific problem. Direct, technical, concise, no marketing language.
+- Every sentence carries information. If a paragraph's first sentence only restates the heading, delete it.
+- No "as an AI", no knowledge-cutoff disclaimers, no offers to help further.
+- Banned phrases: "in today's fast-paced world", "in this article", "delve into", "game-changer", "in the ever-evolving", "landscape", "moreover", "furthermore", "it's important to note", "when it comes to", "unlock the power", "revolutionize", "seamless", "robust", "elevate", "empower", "leverage", "journey", "deep dive", "in conclusion", "let's dive in".
+- Never use an em dash or en dash, as characters or as HTML entities. Use a hyphen, a comma, a colon, or split the sentence.
 - Do not imply David personally built, tested, or operated a system unless the AUTHOR PROFILE directly supports that claim.
-- Write to a professional engineer. Direct, technical, concise. No "as an AI", no knowledge-cutoff disclaimers.
-
-SEARCH BASICS
-- The page title is rendered as "<title> | David Dew Mallick", so keep the title itself within 35 to 50 characters.
-- Titles, descriptions, and headings are suggestions to search engines, not contracts. Write a title that accurately describes the article and a description that reads as a genuine summary of this specific page.
-- Never stuff keywords into a title, description, heading, or anchor. Google rewrites or truncates these when they are not useful, and keyword stuffed text reads as spam to people and to search engines.
-- primaryKeyword should read like a phrase a person would type. Use it in the title and wherever it fits naturally in the body. There is no required number of repetitions.
-- secondaryKeywords must be specific sub-topics of the primaryKeyword, not generic category terms. Use one only where it fits the sentence naturally.
-- Slug: 3 to 6 words derived from the primary keyword, lowercase, hyphenated.
-- H2 headings should be question or task based where that reads naturally, and should describe what the section actually covers.
-- Internal links: 1 or 2, only when genuinely useful. Link a related published post or a relevant portfolio page. Never link to an unpublished draft and never invent a URL.
-- External links: maximum 3, official documentation only (laravel.com, php.net, postgresql.org, developer.mozilla.org, redis.io, docker.com).
-
-LENGTH AND DENSITY
-- Target 1,000 to 1,500 words. Go shorter when the subject is narrow. Never pad a post to reach a word count.
-- Keep sections focused and vary their length to match the material. Avoid repeating the same section pattern in every post.
-- Add an FAQ only when it answers real follow-up questions. When you include one, use exactly this structure so the page can emit FAQ structured data: <h2>Frequently asked questions</h2> followed by 2 or 3 <h3>question</h3><p>answer</p> pairs with 40 to 60 word answers. Omit the section entirely otherwise.
-- Every sentence must carry information. If a paragraph's first sentence only restates the heading, delete it.
-- Banned punctuation: never use an em dash or en dash, as characters or as HTML entities. Use a hyphen, a comma, a colon, or split the sentence.
-- Banned filler phrases: "in today's fast-paced world", "in this article", "delve into", "game-changer", "in the ever-evolving", "landscape", "moreover", "furthermore", "it's important to note", "when it comes to", "unlock the power", "revolutionize", "seamless", "robust", "elevate", "empower", "leverage", "journey", "deep dive", "in conclusion", "let's dive in".
 
 HTML CONTRACT (MUST FOLLOW EXACTLY)
 - Fragment only: no <!DOCTYPE>, <html>, <head>, <body>, <style>, <script>, <iframe>, no style="" attributes, no on* attributes.
@@ -170,49 +233,52 @@ HTML CONTRACT (MUST FOLLOW EXACTLY)
 - Escape angle brackets inside code blocks as &lt; and &gt;. Never place raw markup inside <code>.
 - Every <a> must have a real href.
 
-QUALITY BAR
-- Code must be real, syntactic, and runnable. Prefer stable, well-known APIs over version-sensitive claims. Never invent benchmarks, citations, or company case studies. No fabricated metrics.
-- Explain meaningful tradeoffs, failure modes, assumptions, and how a reader can verify the result. Cite official documentation for version-sensitive behavior.`;
+SELF-CHECK BEFORE RETURNING
+Fix every violation, then return the JSON:
+1. primaryKeyword appears in the title and the body, and is not in USED KEYWORDS.
+2. Exactly 4 secondaryKeywords, all from CANDIDATE KEYWORDS, at least 1 present in the body.
+3. Title is 35 to 50 characters; description is 120 to 155 characters and specific to this article.
+4. Word count is within 900 to 2,600, with no padding.
+5. At least one information-gain element is present.
+6. At least one internal link points to a published post; every link target is real and listed.
+7. No fabricated numbers, sources, or experience; version claims match official documentation.
+8. No banned phrase, no em or en dash, no AI topic.
+9. The JSON parses and contains every required field.`;
 
-export function buildBlogMessages({
-  trends,
-  recentPosts,
-  today,
-  keywordCandidates,
-  categories,
-  searchQueries,
-}: BlogPromptContext): ChatMessage[] {
-  const userPrompt = `Write the next article for the blog.
+const GENERATION_USER_TEMPLATE = `Write the next article for the blog.
 
-TODAY: ${today.toISOString().slice(0, 10)}
+TODAY: {{today}}
 
 TRENDING SIGNALS (pick exactly one non-AI signal as the seed, or a curated topic if none fit):
-${formatSignals(trends)}
+{{signals}}
 
-PRIMARY CATEGORY CONTEXT: ${categories.length > 0 ? categories.join(", ") : "software engineering"}
+PRIMARY CATEGORY CONTEXT: {{categories}}
 
-CANDIDATE KEYWORDS (real search phrases; choose a primaryKeyword and exactly 4 secondaryKeywords from this list):
-${formatKeywords(keywordCandidates)}
+CANDIDATE KEYWORDS (choose primaryKeyword and exactly 4 secondaryKeywords from this list):
+{{keywords}}
 
-SEARCH CONSOLE QUERIES (real queries where this site already appeared in search; these are observed demand, not guesses):
-${formatSearchQueries(searchQueries)}
+USED KEYWORDS (never use any of these as primaryKeyword; they belong to recent posts):
+{{usedKeywords}}
 
-EXISTING POSTS (do NOT duplicate these topics; the published ones are the only valid internal link targets):
-${formatRecentPosts(recentPosts)}
+SEARCH CONSOLE QUERIES (real queries where this site already appeared in search; observed demand, not guesses):
+{{searchQueries}}
+
+EXISTING POSTS (do NOT duplicate these topics; only the published ones are valid internal link targets):
+{{recentPosts}}
 
 AUTHOR PROFILE:
-${buildAuthorProfile()}
+{{authorProfile}}
+
+{{keyword}}
 
 REQUIREMENTS
 - Choose a seed topic a working engineer would search for, and return it verbatim in the "topic" field.
+- Prefer a Search Console query over a generic trend signal when the two are close. Where a published post already matches a query, go deeper on a specific sub-topic instead of restating the same article.
 - Rotate categories relative to the most recent posts when a strong alternative signal exists.
-- Prefer a Search Console query over a generic trend signal when the two are close. Where a query already has a matching published post, go deeper on a specific sub-topic of it rather than restating the same article.
-- Forbidden topics include anything AI/ML/LLM related, even if it appears in the signals above.
-- Before returning, verify: the title is 35 to 50 characters and describes the article accurately; the description is 120 to 155 characters and reads as a summary of this specific page; the primaryKeyword appears in the title and reads naturally in the body with no repetition target; exactly 4 secondaryKeywords are present and the ones you use fit their sentences; tags are 1 to 3 word lowercase labels, never full keyword phrases; at least one internal link points to a published post listed above; code and comparisons are accurate; the word count is useful rather than padded; every link is real.
+- Run the SELF-CHECK from the system prompt before returning and fix every violation.
 - Return the single JSON object now.`;
 
-  return [
-    { role: "system", content: BLOG_SYSTEM_PROMPT },
-    { role: "user", content: userPrompt },
-  ];
-}
+export const DEFAULT_GENERATION_PROMPT = {
+  system: GENERATION_SYSTEM_PROMPT,
+  user: GENERATION_USER_TEMPLATE,
+};

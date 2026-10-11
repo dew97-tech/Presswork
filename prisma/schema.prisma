@@ -101,3 +101,65 @@ model GenerationRun {
   @@index([startedAt])
   @@index([status, startedAt(sort: Desc)])
 }
+
+model AppSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+model GoogleConnection {
+  id           String   @id @default(cuid())
+  provider     String   @unique // "google"
+  email        String?
+  accessToken  String   @db.Text // encrypted (crypto.ts)
+  refreshToken String   @db.Text // encrypted
+  expiresAt    DateTime
+  scope        String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Keyword {
+  id                     String    @id @default(cuid())
+  keyword                String    @unique
+  geo                    String    @default("2840")
+  language               String    @default("1000")
+  avgMonthlySearches     Int?
+  competition            String?
+  competitionIndex       Int?
+  lowTopOfPageBidMicros  BigInt?
+  highTopOfPageBidMicros BigInt?
+  monthlyVolumes         Json?
+  source                 String    @default("keyword_planner") // "keyword_planner" | "manual" | "gsc"
+  status                 String    @default("new") // "new" | "used" | "ignored"
+  postId                 String?
+  usedAt                 DateTime?
+  fetchedAt              DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  @@index([status])
+  @@index([avgMonthlySearches(sort: Desc)])
+}
+
+model ArticleReview {
+  id            String    @id @default(cuid())
+  postId        String
+  model         String
+  status        String
+  usedWebSearch Boolean   @default(false)
+  claims        Json?
+  findings      Json?
+  seoNotes      Json?
+  suggested     Json?
+  sources       Json?
+  inputTokens   Int?
+  outputTokens  Int?
+  cost          Float?
+  error         String?   @db.Text
+  createdAt     DateTime  @default(now())
+  appliedAt     DateTime?
+
+  @@index([postId, createdAt(sort: Desc)])
+}

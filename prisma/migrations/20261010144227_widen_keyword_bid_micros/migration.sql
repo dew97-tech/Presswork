@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "Keyword" ALTER COLUMN "lowTopOfPageBidMicros" SET DATA TYPE BIGINT,
+ALTER COLUMN "highTopOfPageBidMicros" SET DATA TYPE BIGINT;

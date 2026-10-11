@@ -1,98 +1,78 @@
-# David Dew Mallick
+# Presswork
 
-Portfolio and editorial blog for David Dew Mallick, a software engineer in Dhaka, Bangladesh. Built with Next.js 16, Prisma, and Supabase, and deployed on Vercel.
+A portfolio site that runs its own blog pipeline. It drafts articles with selectable AI models, checks them for accuracy, researches keywords, and measures what ranks, all from an admin dashboard wired to live Google data.
 
-[![Next.js](https://img.shields.io/badge/Next.js-000000?style=flat-square&logo=nextdotjs&logoColor=white)](https://nextjs.org/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
-[![Prisma](https://img.shields.io/badge/Prisma-2D3748?style=flat-square&logo=prisma&logoColor=white)](https://www.prisma.io/)
-[![Vercel](https://img.shields.io/badge/Vercel-000000?style=flat-square&logo=vercel&logoColor=white)](https://vercel.com/)
+**Live:** [davidmallick.dev](https://davidmallick.dev) · **License:** MIT, see [LICENSE](./LICENSE)
 
-**Live:** [davidmallick.dev](https://davidmallick.dev)
+## Intention
 
-## Overview
+Publishing regularly is easy. Publishing accurately is not. This project automates the draft but keeps verification human: every article is reviewed claim by claim before it ships, and Search Console data decides what to write next instead of guesswork. It is built to be forked. Strip the personal content and the same pipeline runs any blog.
 
-The site serves two purposes. It presents a professional portfolio, and it runs a blog with its own administration and an automated drafting pipeline.
+## What you get
 
-The home page, case studies, and published articles are prerendered with a daily revalidation. The blog listing, search, and dashboard render on request, and drafts and search results are kept out of search indexes.
+**If you write content**, at `/admin`:
 
-## Stack
+- New post editor with rich text, cover image upload, and image-prompt generation.
+- Article review: AI checks accuracy with web search, you apply fixes per field. Nothing changes until you approve it.
+- Keywords page (`/admin/keywords`): real search volume, competition, and bid ranges from Google Ads. Pick a keyword, generate a draft from it, and the row tracks whether it is written.
+- Search Console dashboard (`/admin/search-console`): clicks, impressions, CTR, and position with compare mode, index status per post, and AI analysis with priorities and quick wins.
+- Settings (`/admin/settings`) and Prompts (`/admin/prompts`): change AI models and rewrite the generation, review, and analysis prompts without touching code.
 
-| Area | Technology |
-| --- | --- |
-| Framework | Next.js 16, App Router, React 19 |
-| Language | TypeScript 5 |
-| Styling | Tailwind CSS v4 with a CSS-first theme |
-| Database | PostgreSQL on Supabase, Prisma 5 |
-| Authentication | Auth.js (NextAuth v5) with bcrypt password hashing |
-| Editor | Tiptap |
-| File storage | Vercel Blob |
-| Hosting | Vercel, functions pinned to the `sin1` region |
+**If you build software**, in the code:
 
-## Features
+- Next.js 16 App Router with React 19, TypeScript 5, Tailwind CSS v4, Prisma 5 on Supabase Postgres.
+- One `callModel` facade over three AI endpoint families (chat, responses, messages), so every catalog model is selectable.
+- Typed settings store with zod validation, AES-256-GCM encryption for stored tokens, and additive-only migrations that are safe to deploy against a shared database.
+- Google OAuth with PKCE and refresh-token rotation, Search Console and Keyword Planner REST clients with typed errors, Auth.js credentials auth, Vercel Blob uploads, and a cron-driven generation pipeline.
 
-**Portfolio**
+**If you own the site**: the dashboard answers what to write next from your own search data, with no SEO tool subscription for the basics.
 
-- Hero, experience timeline, and project cards built from typed data in `src/data`
-- Two long-form case studies at `/work/bridgebooks` and `/work/augmenta`
-- Skills, education, publications, awards, and a downloadable CV
+## Reuse
 
-**Blog**
+MIT licensed. Use it as a portfolio, a blog engine, an AI writing pipeline, or a Search Console plus Keyword Planner admin. Forks commonly keep `src/app/lib`, `src/app/admin`, and `prisma/` and replace `src/data` and `src/components` with their own content.
 
-- Listing with search and pagination, plus article pages with reading progress
-- RSS feed, XML sitemap, and per-article structured data
-- Publication date recorded separately from draft creation date
+## Setup
 
-**Administration**
-
-- Authenticated dashboard for creating, editing, publishing, and deleting posts
-- Rich text editor with thumbnail upload to Vercel Blob
-- Draft queue with a manual trigger for the generation pipeline
-
-**Automation**
-
-- A daily cron drafts one article from live trend feeds, a curated topic bank, and Search Console queries
-- Each draft is validated for length, structure, keyword use, and link targets before it is stored
-- Drafts remain unpublished, and generation pauses once three are awaiting review
-
-## Getting started
-
-Requires Node.js 20.9 or newer and a PostgreSQL database.
+Requires Node.js 20.9 or newer, a PostgreSQL database, and optionally a Google Cloud project.
 
 ```bash
-git clone https://github.com/dew97-tech/NextFolio.git
-cd NextFolio
+git clone https://github.com/dew97-tech/Presswork.git
+cd Presswork
 npm install
 cp .env.example .env
 ```
 
-Fill in `.env`, then apply the migrations and start the development server:
+Fill in `.env` (table below), then migrate and run:
 
 ```bash
 npx prisma migrate deploy
 npm run dev
 ```
 
-The site runs at http://localhost:3000.
+Open http://localhost:3000. There is no default account. While the user table is empty, the first sign-in creates the admin only when the credentials match `ADMIN_EMAIL` and `ADMIN_PASSWORD`. Clear `ADMIN_PASSWORD` afterwards.
 
-There is no default account. While the user table is empty, an admin is created on the first sign-in only when the submitted credentials match `ADMIN_EMAIL` and `ADMIN_PASSWORD`. Clear `ADMIN_PASSWORD` afterwards to disable that path.
+Then, in `/admin/settings`: choose AI models, connect the Google account, pick the Search Console property, and add the Keyword Planner customer ID.
 
 ## Environment variables
 
-| Variable | Purpose |
-| --- | --- |
-| `DATABASE_URL` | Pooled connection used by the application at runtime, port 6543 |
-| `DIRECT_URL` | Direct connection used only by the Prisma CLI for migrations, port 5432 |
-| `AUTH_SECRET` | Session signing key |
-| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | First-admin bootstrap, disabled once cleared |
-| `NEXT_PUBLIC_SITE_URL` | Canonical site URL, without a trailing slash |
-| `BLOB_READ_WRITE_TOKEN` | Vercel Blob access for thumbnail uploads |
-| `OPENCODE_GO_API_KEY` | Model access for article generation |
-| `CRON_SECRET` | Protects the generation endpoint |
-| `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_PRIVATE_KEY` | Search Console reads |
-| `GSC_PROPERTY` | Search Console property, for example `sc-domain:example.com` |
+| Variable | Needed for | Without it |
+| --- | --- | --- |
+| `DATABASE_URL` | Runtime database access (pooler, port 6543) | Nothing runs |
+| `DIRECT_URL` | Prisma CLI migrations (port 5432) | Cannot migrate |
+| `AUTH_SECRET` | Session signing | Sign-in fails |
+| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | First-admin bootstrap | No admin can be created |
+| `NEXT_PUBLIC_SITE_URL` | Canonical URL, no trailing slash | Wrong canonical links |
+| `BLOB_READ_WRITE_TOKEN` | Cover image uploads | Uploads fail, URL paste still works |
+| `OPENCODE_GO_API_KEY` | All AI calls | No generation, review, prompts, or analysis |
+| `CRON_SECRET` | Protects the daily generation endpoint | Endpoint rejects requests |
+| `SETTINGS_ENCRYPTION_KEY` | Decrypts stored Google tokens | Google connection unusable |
+| `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` | Google sign-in for Search Console and Ads | Cannot connect Google |
+| `GOOGLE_ADS_DEVELOPER_TOKEN` | Keyword Planner metrics | Keyword sync and refresh fail |
+| `GSC_PROPERTY` | Default Search Console property | Property picker starts empty |
+| `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_PRIVATE_KEY` | Search demand fallback for generation | Generation runs without demand data |
+| `WEB_SEARCH_PROVIDER`, `WEB_SEARCH_API_KEY` | Web verification for reviews | Claims stay unverifiable |
 
-`DEPLOYMENT.md` covers how each value is obtained.
+`DEPLOYMENT.md` covers where each Google value comes from and the production procedure.
 
 ## Scripts
 
@@ -104,36 +84,28 @@ There is no default account. While the user table is empty, an admin is created 
 | `npm run lint` | ESLint |
 | `npm run typecheck` | TypeScript check without emitting |
 | `npm run check:dashes` | Fails on em or en dashes in source |
-| `npm run strip:dashes` | Rewrites em and en dashes in source |
 | `npm run og` | Regenerates the Open Graph image |
 
-## Project structure
+## Structure
 
 ```
 src/
   app/
-    (site)/       Public pages: home, blog, and case studies
-    admin/        Authenticated dashboard and post editor
-    api/          Auth, upload, and cron route handlers
-    lib/          Server actions, Prisma client, generation, Google APIs
-    ui/           Client components for the blog and admin interface
+    (site)/       Public pages: home, blog, case studies
+    admin/        Dashboard, editor, keywords, Search Console, settings, prompts
+    api/          Auth, upload, cron, and Google OAuth routes
+    lib/          AI pipeline, prompts, Google clients, server actions
+    ui/           Client components for blog and admin
   components/     Portfolio sections
-  data/           Typed resume and case study content
+  data/           Typed resume and case study content (replace on fork)
 prisma/           Schema and migrations
 scripts/          Maintenance scripts
 ```
 
-## Deployment
-
-Pushes to `main` deploy to production on Vercel. The build applies pending migrations before the Next.js build, and functions run in the `sin1` region alongside the database. The complete procedure, including DNS and environment configuration, is documented in `DEPLOYMENT.md`.
-
-## Documentation
+## Docs
 
 | Document | Contents |
 | --- | --- |
-| `DEPLOYMENT.md` | Deployment steps, environment setup, and troubleshooting |
-| `DESIGN.md` | Design system: palette, typography, shape, structure, and copy rules |
-
-## License
-
-Released under the MIT License. Copyright (c) 2026 David Dew Mallick.
+| `DEPLOYMENT.md` | Production deploy, Google setup, troubleshooting |
+| `DESIGN.md` | Design system: palette, typography, shape, copy rules |
+| `LICENSE` | MIT License |

@@ -1,17 +1,23 @@
 "use server";
 
 import { runBlogGeneration } from "@/app/lib/ai/generate-blog";
+import { callModel } from "@/app/lib/ai/call-model";
 import {
   buildImagePromptMessages,
   cleanImagePrompt,
   fallbackImagePrompt,
 } from "@/app/lib/ai/image-prompt";
-import { chatCompletion, GO_MODELS } from "@/app/lib/ai/opencode-go";
+import { getModel } from "@/app/lib/ai/models";
+import { getGenerationSettings, getImageSettings } from "@/app/lib/settings";
 import prisma from "@/app/lib/prisma";
+import { revalidatePostSurfaces } from "@/app/lib/post-revalidate";
+import {
+  markKeywordsUsedForPost,
+  resetKeywordsForPost,
+} from "@/app/lib/keyword-usage";
 import { auth } from "@/auth";
 import { deleteBlobIfUnused } from "@/app/lib/blob";
 import { Prisma } from "@prisma/client";
-import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
@@ -59,18 +65,6 @@ function isUniqueConstraintError(error: unknown) {
   );
 }
 
-function revalidatePostSurfaces(...slugs: string[]) {
-  revalidatePath("/blog");
-  revalidatePath("/blog/tag/[tag]", "page");
-  revalidatePath("/admin");
-  revalidatePath("/sitemap.xml");
-  revalidatePath("/feed.xml");
-
-  for (const slug of slugs) {
-    if (slug) revalidatePath(`/blog/${slug}`);
-  }
-}
-
 export async function createPost(prevState: PostFormState, formData: FormData) {
   const session = await auth();
   if (!session?.user) {
@@ -116,7 +110,7 @@ export async function createPost(prevState: PostFormState, formData: FormData) {
   }
 
   try {
-    await prisma.post.create({
+    const post = await prisma.post.create({
       data: {
         title: normalizeDashes(title),
         slug,
@@ -129,6 +123,7 @@ export async function createPost(prevState: PostFormState, formData: FormData) {
         publishedAt: published ? new Date() : null,
       },
     });
+    await markKeywordsUsedForPost(post.id);
   } catch (error) {
     if (isUniqueConstraintError(error)) {
       return {
@@ -189,7 +184,7 @@ export async function updatePost(
   }
 
   try {
-    await prisma.post.update({
+    const post = await prisma.post.update({
       where: { id },
       data: {
         title: normalizeDashes(title),
@@ -205,6 +200,7 @@ export async function updatePost(
           : {}),
       },
     });
+    await markKeywordsUsedForPost(post.id);
   } catch (error) {
     if (isUniqueConstraintError(error)) {
       return {
@@ -227,10 +223,15 @@ export async function updatePost(
   redirect("/admin");
 }
 
-export async function deletePost(id: string) {
+export interface DeletePostResult {
+  ok: boolean;
+  error?: string;
+}
+
+export async function deletePost(id: string): Promise<DeletePostResult> {
   const session = await auth();
   if (!session?.user) {
-    return;
+    return { ok: false, error: "Unauthorized" };
   }
 
   const existing = await prisma.post.findUnique({
@@ -239,7 +240,7 @@ export async function deletePost(id: string) {
   });
 
   if (!existing) {
-    return;
+    return { ok: false, error: "Post not found." };
   }
 
   try {
@@ -247,13 +248,17 @@ export async function deletePost(id: string) {
       where: { id },
     });
 
+    await resetKeywordsForPost(id);
+
     if (existing.thumbnail) {
       await deleteBlobIfUnused(existing.thumbnail);
     }
 
     revalidatePostSurfaces(existing.slug);
+    return { ok: true };
   } catch (error) {
     console.error("Failed to delete post:", error);
+    return { ok: false, error: "Delete failed. Check the server logs." };
   }
 }
 
@@ -289,9 +294,11 @@ export async function triggerGeneration(
 
   const modelErrors =
     result.errors?.filter((entry) => entry.model !== "deadline") ?? [];
+  const { chain } = await getGenerationSettings();
+  const chainLength = chain.length > 0 ? chain.length : 1;
   const message =
-    modelErrors.length >= GO_MODELS.length
-      ? `Tried all ${GO_MODELS.length} models. None produced a valid draft.`
+    modelErrors.length >= chainLength
+      ? `Tried all ${chainLength} models. None produced a valid draft.`
       : "Generation failed before a draft passed validation.";
   const detail = result.errors?.length
     ? result.errors
@@ -335,14 +342,22 @@ export async function generateImagePrompt(input: {
   }
 
   try {
-    const result = await chatCompletion({
-      model: GO_MODELS[0].id,
+    const imageSettings = await getImageSettings();
+    const model =
+      getModel(imageSettings.modelId) ?? getModel("glm-5.3-flash");
+    if (!model) {
+      return { prompt: fallbackImagePrompt(context) };
+    }
+
+    const result = await callModel({
+      modelId: model.id,
       messages: buildImagePromptMessages(context),
       sessionId: `portfolio-cover-${Date.now()}`,
       temperature: 0.8,
       maxTokens: 1_200,
       timeoutMs: 40_000,
       jsonMode: false,
+      reasoningEffort: imageSettings.reasoningEffort,
     });
 
     const prompt = cleanImagePrompt(result.content);
