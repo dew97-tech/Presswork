@@ -125,6 +125,8 @@ export async function getGoogleAccountSummaries(): Promise<{
   };
 }
 
+const adsTokenCache = new Map<string, { token: string; expiresAt: number }>();
+
 export async function getAdsAccessToken(): Promise<string> {
   const adsLabel = await getSetting<string | null>(
     SETTINGS_KEYS.googleAdsAccount,
@@ -133,6 +135,11 @@ export async function getAdsAccessToken(): Promise<string> {
   );
 
   if (adsLabel) {
+    const cached = adsTokenCache.get(adsLabel);
+    if (cached && cached.expiresAt > Date.now() + 60_000) {
+      return cached.token;
+    }
+
     const accounts = await getStoredGoogleAccounts();
     const account = accounts.find((entry) => entry.label === adsLabel);
     if (!account) {
@@ -147,6 +154,10 @@ export async function getAdsAccessToken(): Promise<string> {
         { clientId: account.clientId, clientSecret: account.clientSecret },
         account.refreshToken,
       );
+      adsTokenCache.set(adsLabel, {
+        token: refreshed.accessToken,
+        expiresAt: Date.now() + refreshed.expiresIn * 1000,
+      });
       return refreshed.accessToken;
     } catch (error) {
       throw new Error(
@@ -217,13 +228,19 @@ export async function activateGoogleAccount(
     return { ok: false, error: "That account has no refresh token stored." };
   }
 
-  const { seedConnectionFromRefreshToken } = await import("./oauth");
+  const { GOOGLE_OAUTH_SCOPES, refreshAccessTokenWith, storeConnection } =
+    await import("./oauth");
 
+  let refreshed: {
+    accessToken: string;
+    expiresIn: number;
+    scope: string | null;
+  };
   try {
-    await seedConnectionFromRefreshToken({
-      refreshToken: account.refreshToken,
-      email: account.googleAccount || null,
-    });
+    refreshed = await refreshAccessTokenWith(
+      { clientId: account.clientId, clientSecret: account.clientSecret },
+      account.refreshToken,
+    );
   } catch (error) {
     return {
       ok: false,
@@ -233,6 +250,19 @@ export async function activateGoogleAccount(
           : "Google rejected the refresh token.",
     };
   }
+
+  await storeConnection({
+    accessToken: refreshed.accessToken,
+    refreshToken: account.refreshToken,
+    expiresIn: refreshed.expiresIn,
+    scope: refreshed.scope ?? GOOGLE_OAUTH_SCOPES.join(" "),
+    email: account.googleAccount || null,
+  });
+
+  await prisma.googleConnection.update({
+    where: { provider: "google" },
+    data: { email: account.googleAccount || null },
+  });
 
   const planner = await getKeywordPlannerSettings();
   await setSetting(SETTINGS_KEYS.keywordsPlanner, {
