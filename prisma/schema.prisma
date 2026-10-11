@@ -143,6 +143,14 @@ model Keyword {
   @@index([avgMonthlySearches(sort: Desc)])
 }
 
+model LoginAttempt {
+  key          String    @id
+  count        Int       @default(0)
+  windowStart  DateTime  @default(now())
+  blockedUntil DateTime?
+  updatedAt    DateTime  @updatedAt
+}
+
 model ArticleReview {
   id            String    @id @default(cuid())
   postId        String

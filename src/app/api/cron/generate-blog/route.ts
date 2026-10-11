@@ -1,8 +1,16 @@
+import { timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { runBlogGeneration } from "@/app/lib/ai/generate-blog";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
+
+function safeEqual(a: string, b: string): boolean {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  if (left.length !== right.length) return false;
+  return timingSafeEqual(left, right);
+}
 
 export async function GET(request: NextRequest) {
   const cronSecret = process.env.CRON_SECRET;
@@ -15,7 +23,7 @@ export async function GET(request: NextRequest) {
   }
 
   const authorization = request.headers.get("authorization");
-  if (authorization !== `Bearer ${cronSecret}`) {
+  if (!authorization || !safeEqual(authorization, `Bearer ${cronSecret}`)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
