@@ -12,7 +12,8 @@ const SITE_URL = (
   process.env.NEXT_PUBLIC_SITE_URL ?? "https://davidmallick.dev"
 ).replace(/\/$/, "");
 const CRAWL_DELAY_MS = 300;
-const SYNC_TIME_BUDGET_MS = 540_000;
+const SYNC_TIME_BUDGET_MS = 240_000;
+const INSPECT_CONCURRENCY = 3;
 
 export interface SyncIndexResult {
   ok: boolean;
@@ -52,49 +53,67 @@ export async function syncIndexStatus(): Promise<SyncIndexResult> {
   let incomplete = false;
   const errors: string[] = [];
   const startedAt = Date.now();
+  let authFailure: GscAuthError | GscNotConnectedError | null = null;
 
-  for (let index = 0; index < posts.length; index += 1) {
+  for (let index = 0; index < posts.length; index += INSPECT_CONCURRENCY) {
     if (Date.now() - startedAt > SYNC_TIME_BUDGET_MS) {
       incomplete = true;
       break;
     }
 
-    const post = posts[index];
-    processed += 1;
+    const batch = posts.slice(index, index + INSPECT_CONCURRENCY);
+    const settled = await Promise.allSettled(
+      batch.map(async (post) => {
+        const result = await inspectUrl(`${SITE_URL}/blog/${post.slug}`);
+        const state = result.coverageState ?? result.verdict ?? null;
 
-    try {
-      const result = await inspectUrl(`${SITE_URL}/blog/${post.slug}`);
-      const state = result.coverageState ?? result.verdict ?? null;
-      if (state && reportsIndexed(state)) {
-        indexed += 1;
+        await prisma.post.update({
+          where: { id: post.id },
+          data: {
+            indexStatus: state,
+            ...(result.lastCrawlTime
+              ? { indexedAt: new Date(result.lastCrawlTime) }
+              : {}),
+          },
+        });
+
+        return { state };
+      }),
+    );
+
+    for (let offset = 0; offset < settled.length; offset += 1) {
+      const outcome = settled[offset];
+      const post = batch[offset];
+      processed += 1;
+
+      if (outcome.status === "fulfilled") {
+        if (outcome.value.state && reportsIndexed(outcome.value.state)) {
+          indexed += 1;
+        }
+        continue;
       }
 
-      await prisma.post.update({
-        where: { id: post.id },
-        data: {
-          indexStatus: state,
-          ...(result.lastCrawlTime
-            ? { indexedAt: new Date(result.lastCrawlTime) }
-            : {}),
-        },
-      });
-    } catch (error) {
+      const error: unknown = outcome.reason;
       if (error instanceof GscAuthError || error instanceof GscNotConnectedError) {
-        return {
-          ok: false,
-          error: error.message,
-          checked: index,
-          indexed,
-          errors,
-        };
+        authFailure = error;
+      } else {
+        const message =
+          error instanceof Error ? error.message : "URL inspection failed.";
+        errors.push(`${post.slug}: ${message}`);
       }
-
-      const message =
-        error instanceof Error ? error.message : "URL inspection failed.";
-      errors.push(`${post.slug}: ${message}`);
     }
 
-    if (index < posts.length - 1) {
+    if (authFailure) {
+      return {
+        ok: false,
+        error: authFailure.message,
+        checked: processed,
+        indexed,
+        errors,
+      };
+    }
+
+    if (index + INSPECT_CONCURRENCY < posts.length) {
       await delay(CRAWL_DELAY_MS);
     }
   }

@@ -27,7 +27,7 @@ const SEEDS_PER_CALL = 5;
 const MAX_SYNC_RESULTS = 700;
 const MAX_METRIC_KEYWORDS = 700;
 const MAX_SEED_KEYWORDS = 30;
-const ACTIONS_TIME_BUDGET_MS = 540_000;
+const ACTIONS_TIME_BUDGET_MS = 240_000;
 
 export interface SyncKeywordIdeasResult {
   ok: boolean;
