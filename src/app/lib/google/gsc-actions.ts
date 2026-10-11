@@ -12,12 +12,14 @@ const SITE_URL = (
   process.env.NEXT_PUBLIC_SITE_URL ?? "https://davidmallick.dev"
 ).replace(/\/$/, "");
 const CRAWL_DELAY_MS = 300;
+const SYNC_TIME_BUDGET_MS = 540_000;
 
 export interface SyncIndexResult {
   ok: boolean;
   checked?: number;
   indexed?: number;
   errors?: string[];
+  incomplete?: boolean;
   error?: string;
 }
 
@@ -46,10 +48,19 @@ export async function syncIndexStatus(): Promise<SyncIndexResult> {
   });
 
   let indexed = 0;
+  let processed = 0;
+  let incomplete = false;
   const errors: string[] = [];
+  const startedAt = Date.now();
 
   for (let index = 0; index < posts.length; index += 1) {
+    if (Date.now() - startedAt > SYNC_TIME_BUDGET_MS) {
+      incomplete = true;
+      break;
+    }
+
     const post = posts[index];
+    processed += 1;
 
     try {
       const result = await inspectUrl(`${SITE_URL}/blog/${post.slug}`);
@@ -93,9 +104,10 @@ export async function syncIndexStatus(): Promise<SyncIndexResult> {
 
   return {
     ok: true,
-    checked: posts.length,
+    checked: processed,
     indexed,
     errors: errors.slice(0, 10),
+    incomplete,
   };
 }
 

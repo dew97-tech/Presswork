@@ -27,11 +27,18 @@ export default function SyncIndexButton() {
       const checked = result.checked ?? 0;
       const indexed = result.indexed ?? 0;
       const errors = result.errors ?? [];
+      const suffix = result.incomplete
+        ? " The time budget ran out; click again to continue."
+        : "";
 
       toast({
-        variant: errors.length > 0 ? "info" : "success",
+        variant: result.incomplete
+          ? "info"
+          : errors.length > 0
+            ? "info"
+            : "success",
         label: "Index sync",
-        title: `${indexed} of ${checked} published posts report as indexed.`,
+        title: `${indexed} of ${checked} checked posts report as indexed.${suffix}`,
         detail: errors.length > 0 ? errors.join("\n") : undefined,
       });
 

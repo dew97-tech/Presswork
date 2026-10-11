@@ -27,6 +27,7 @@ const SEEDS_PER_CALL = 5;
 const MAX_SYNC_RESULTS = 700;
 const MAX_METRIC_KEYWORDS = 700;
 const MAX_SEED_KEYWORDS = 30;
+const ACTIONS_TIME_BUDGET_MS = 540_000;
 
 export interface SyncKeywordIdeasResult {
   ok: boolean;
@@ -36,6 +37,7 @@ export interface SyncKeywordIdeasResult {
   updated?: number;
   total?: number;
   calls?: number;
+  incomplete?: boolean;
 }
 
 export interface KeywordActionResult {
@@ -44,6 +46,7 @@ export interface KeywordActionResult {
   hint?: string | null;
   updated?: number;
   keyword?: string;
+  incomplete?: boolean;
 }
 
 function canonical(value: string): string {
@@ -206,8 +209,15 @@ export async function syncKeywordIdeas(input: {
 
   let added = 0;
   let updated = 0;
+  let incomplete = false;
+  const startedAt = Date.now();
 
   for (const idea of filtered) {
+    if (Date.now() - startedAt > ACTIONS_TIME_BUDGET_MS) {
+      incomplete = true;
+      break;
+    }
+
     const metrics = metricData(idea);
     await prisma.keyword.upsert({
       where: { keyword: idea.keyword },
@@ -229,7 +239,14 @@ export async function syncKeywordIdeas(input: {
   await setSetting(SETTINGS_KEYS.keywordsLastSyncAt, new Date().toISOString());
   revalidatePath("/admin/keywords");
 
-  return { ok: true, added, updated, total: filtered.length, calls };
+  return {
+    ok: true,
+    added,
+    updated,
+    total: added + updated,
+    calls,
+    incomplete,
+  };
 }
 
 export async function addKeyword(input: string): Promise<KeywordActionResult> {
@@ -317,7 +334,15 @@ export async function refreshKeywordMetrics(
   );
 
   let updated = 0;
+  let incomplete = false;
+  const startedAt = Date.now();
+
   for (const row of rows) {
+    if (Date.now() - startedAt > ACTIONS_TIME_BUDGET_MS) {
+      incomplete = true;
+      break;
+    }
+
     const idea = byKeyword.get(row.keyword);
     if (!idea) continue;
     await prisma.keyword.update({
@@ -328,7 +353,7 @@ export async function refreshKeywordMetrics(
   }
 
   revalidatePath("/admin/keywords");
-  return { ok: true, updated };
+  return { ok: true, updated, incomplete };
 }
 
 export interface GenerateKeywordDraftResult {

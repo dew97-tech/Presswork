@@ -8,7 +8,7 @@ import { WarningCircle } from "@phosphor-icons/react/ssr";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
+export const maxDuration = 600;
 
 function parseMonthlyVolumes(value: unknown): KeywordMonthlyVolume[] {
   if (!Array.isArray(value)) return [];

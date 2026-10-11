@@ -215,9 +215,11 @@ export default function KeywordsManager({
 
       if (result.ok) {
         toast({
-          variant: "success",
+          variant: result.incomplete ? "info" : "success",
           label: "Sync complete",
-          title: `Added ${result.added ?? 0}, updated ${result.updated ?? 0}`,
+          title: result.incomplete
+            ? `Added ${result.added ?? 0}, updated ${result.updated ?? 0}. Time budget reached; run sync again to finish the rest.`
+            : `Added ${result.added ?? 0}, updated ${result.updated ?? 0}`,
         });
         router.refresh();
         return;
@@ -265,9 +267,11 @@ export default function KeywordsManager({
       if (result.ok) {
         const updated = result.updated ?? 0;
         toast({
-          variant: "success",
+          variant: result.incomplete ? "info" : "success",
           label: "Metrics refreshed",
-          title: `Updated ${updated} keyword${updated === 1 ? "" : "s"}.`,
+          title: result.incomplete
+            ? `Updated ${updated} keyword${updated === 1 ? "" : "s"}. Time budget reached; run refresh again to finish.`
+            : `Updated ${updated} keyword${updated === 1 ? "" : "s"}.`,
         });
         router.refresh();
         return;

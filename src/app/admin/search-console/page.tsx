@@ -32,7 +32,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
+export const maxDuration = 600;
 
 const LAG_DAYS = 3;
 
