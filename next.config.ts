@@ -36,7 +36,7 @@ const nextConfig: NextConfig = {
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob: https://*.public.blob.vercel-storage.com https://images.unsplash.com",
       "font-src 'self' data:",
-      "connect-src 'self'",
+      "connect-src 'self' https://blob.vercel-storage.com https://*.public.blob.vercel-storage.com",
       "media-src 'self'",
       "object-src 'none'",
       "base-uri 'self'",
@@ -91,7 +91,7 @@ const nextConfig: NextConfig = {
             value: "same-origin",
           },
           {
-            key: "Content-Security-Policy-Report-Only",
+            key: "Content-Security-Policy",
             value: csp,
           },
         ],
