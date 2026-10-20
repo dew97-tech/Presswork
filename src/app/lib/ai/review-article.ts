@@ -20,12 +20,19 @@ import {
 } from "./generate-blog";
 import { extractJsonObject } from "./opencode-go";
 import {
+  findTemplateVariables,
   getPrompt,
   PROMPT_KEYS,
   PROMPT_REGISTRY,
   renderPrompt,
 } from "./prompts";
 import type { ReviewContextValues } from "./review-prompt";
+import {
+  extractBlogSlug,
+  formatReviewFocus,
+  reviewFocusSchema,
+  type ReviewFocus,
+} from "@/app/lib/google/feedback";
 
 const claimSchema = z.object({
   claim: z.string().min(5).max(800),
@@ -110,6 +117,7 @@ export interface ReviewResult {
   findings: ReviewFinding[];
   seoNotes: ReviewSeoNotes | null;
   suggested: ReviewSuggested | null;
+  focus: ReviewFocus | null;
   sources: Array<{ title: string; url: string }>;
   inputTokens?: number;
   outputTokens?: number;
@@ -124,6 +132,7 @@ export interface ReviewHistoryItem {
   findingCount: number;
   errorCount: number;
   warningCount: number;
+  feedbackTitle?: string | null;
   error?: string | null;
   createdAt: string;
 }
@@ -141,6 +150,7 @@ export async function listRecentReviews(
       model: true,
       status: true,
       findings: true,
+      focus: true,
       error: true,
       createdAt: true,
     },
@@ -151,6 +161,7 @@ export async function listRecentReviews(
     const severities = findings.map(
       (finding) => (finding as { severity?: string }).severity,
     );
+    const focus = reviewFocusSchema.safeParse(review.focus);
 
     return {
       id: review.id,
@@ -160,6 +171,7 @@ export async function listRecentReviews(
       errorCount: severities.filter((severity) => severity === "error").length,
       warningCount: severities.filter((severity) => severity === "warning")
         .length,
+      feedbackTitle: focus.success ? focus.data.title : null,
       error: review.error,
       createdAt: review.createdAt.toISOString(),
     };
@@ -179,6 +191,7 @@ export async function getStoredReview(
 
   const degradedSearch =
     review.status === "completed" && !review.usedWebSearch;
+  const focus = reviewFocusSchema.safeParse(review.focus);
 
   return {
     reviewId: review.id,
@@ -191,6 +204,7 @@ export async function getStoredReview(
     findings: (review.findings as ReviewFinding[] | null) ?? [],
     seoNotes: (review.seoNotes as ReviewSeoNotes | null) ?? null,
     suggested: (review.suggested as ReviewSuggested | null) ?? null,
+    focus: focus.success ? focus.data : null,
     sources:
       (review.sources as Array<{ title: string; url: string }> | null) ?? [],
     inputTokens: review.inputTokens ?? undefined,
@@ -512,6 +526,7 @@ async function persistFailure(
   postId: string,
   model: string,
   error: unknown,
+  focus?: ReviewFocus | null,
 ): Promise<string> {
   const message =
     error instanceof Error ? error.message : "Unknown article review error";
@@ -523,6 +538,7 @@ async function persistFailure(
         model,
         status: "failed",
         error: message.slice(0, 2000),
+        ...(focus ? { focus: focus as Prisma.InputJsonValue } : {}),
       },
     })
     .catch((persistError) => {
@@ -532,10 +548,31 @@ async function persistFailure(
   return message;
 }
 
-export async function runArticleReview(postId: string): Promise<ReviewResult> {
+export async function runArticleReview(
+  postId: string,
+  focusInput?: unknown,
+): Promise<ReviewResult> {
   const post = await prisma.post.findUnique({ where: { id: postId } });
   if (!post) {
     throw new Error("Post not found.");
+  }
+
+  const parsedFocus =
+    focusInput === undefined || focusInput === null
+      ? null
+      : reviewFocusSchema.safeParse(focusInput);
+  if (parsedFocus && !parsedFocus.success) {
+    throw new Error("The Search Console feedback for this review is invalid.");
+  }
+
+  const focus = parsedFocus?.data ?? null;
+  if (focus) {
+    const focusSlug = extractBlogSlug(focus.page);
+    if (focusSlug && focusSlug !== post.slug) {
+      throw new Error(
+        "The Search Console feedback targets a different article.",
+      );
+    }
   }
 
   const settings = await getReviewSettings();
@@ -565,6 +602,7 @@ export async function runArticleReview(postId: string): Promise<ReviewResult> {
     articleTags: post.tags.join(", ") || "(none recorded)",
     articleContent: post.content,
     searchResults: formatSearchResults(searchResults),
+    searchConsoleFeedback: focus ? formatReviewFocus(focus) : "",
     publishedPosts:
       publishedPosts.length > 0
         ? publishedPosts
@@ -580,6 +618,27 @@ export async function runArticleReview(postId: string): Promise<ReviewResult> {
     prompt,
     context,
   );
+
+  if (
+    focus &&
+    context.searchConsoleFeedback &&
+    !findTemplateVariables(prompt.user).includes("searchConsoleFeedback")
+  ) {
+    const lastMessage = messages[messages.length - 1];
+    if (lastMessage) {
+      messages[messages.length - 1] = {
+        ...lastMessage,
+        content: `${lastMessage.content}
+
+SEARCH CONSOLE FEEDBACK (the operator brief for this review)
+<search-console-feedback>
+${context.searchConsoleFeedback}
+</search-console-feedback>
+
+Address this feedback first, verify it against the article and search evidence, keep unrelated content unchanged, and do not force a change that the evidence contradicts.`,
+      };
+    }
+  }
 
   let modelResult;
   try {
@@ -597,6 +656,7 @@ export async function runArticleReview(postId: string): Promise<ReviewResult> {
       postId,
       settings.modelId,
       error,
+      focus,
     );
     throw new Error(`Review model failed: ${message}`);
   }
@@ -609,6 +669,7 @@ export async function runArticleReview(postId: string): Promise<ReviewResult> {
       postId,
       settings.modelId,
       "The review model returned a response that did not match the required JSON contract.",
+      focus,
     );
     console.error("Review JSON validation failed:", error);
     throw new Error(message);
@@ -669,6 +730,7 @@ export async function runArticleReview(postId: string): Promise<ReviewResult> {
       findings: findings as Prisma.InputJsonValue,
       seoNotes: (parsed.seoNotes ?? null) as Prisma.InputJsonValue,
       suggested: (suggested ?? null) as Prisma.InputJsonValue,
+      ...(focus ? { focus: focus as Prisma.InputJsonValue } : {}),
       sources: sources as Prisma.InputJsonValue,
       inputTokens: modelResult.inputTokens ?? null,
       outputTokens: modelResult.outputTokens ?? null,
@@ -687,6 +749,7 @@ export async function runArticleReview(postId: string): Promise<ReviewResult> {
     findings,
     seoNotes: parsed.seoNotes ?? null,
     suggested,
+    focus,
     sources,
     inputTokens: modelResult.inputTokens,
     outputTokens: modelResult.outputTokens,

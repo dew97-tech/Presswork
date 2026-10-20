@@ -10,6 +10,7 @@ import type {
   ReviewHistoryItem,
   ReviewResult,
 } from "@/app/lib/ai/review-article";
+import type { ReviewFocus } from "@/app/lib/google/feedback";
 import { toPlainText } from "@/app/lib/toc";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
@@ -20,7 +21,7 @@ import {
   Sparkle,
   WarningCircle,
 } from "@phosphor-icons/react";
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 
 type ApplyField = "title" | "description" | "content";
 
@@ -64,6 +65,9 @@ export default function ArticleReviewPanel({
   initialHistory,
   reviewModelLabel,
   webSearchConfigured,
+  initialFocus = null,
+  initialReview = null,
+  autoStart = false,
   onHistoryChange,
 }: {
   postId: string;
@@ -71,10 +75,16 @@ export default function ArticleReviewPanel({
   initialHistory: ReviewHistoryItem[];
   reviewModelLabel: string;
   webSearchConfigured: boolean;
+  initialFocus?: ReviewFocus | null;
+  initialReview?: ReviewResult | null;
+  autoStart?: boolean;
   onHistoryChange?: (history: ReviewHistoryItem[]) => void;
 }) {
   const { toast } = useToast();
-  const [active, setActive] = useState<ReviewResult | null>(null);
+  const [active, setActive] = useState<ReviewResult | null>(initialReview);
+  const [focus, setFocus] = useState<ReviewFocus | null>(
+    initialFocus ?? initialReview?.focus ?? null,
+  );
   const [history, setHistory] = useState<ReviewHistoryItem[]>(initialHistory);
   const [selected, setSelected] = useState<Record<ApplyField, boolean>>({
     title: true,
@@ -86,6 +96,7 @@ export default function ArticleReviewPanel({
   const [isLoading, startLoad] = useTransition();
 
   const suggested = active?.suggested ?? null;
+  const activeFocus = active?.focus ?? focus;
   const hasSuggestions =
     Boolean(suggested?.title) ||
     Boolean(suggested?.description) ||
@@ -99,9 +110,13 @@ export default function ArticleReviewPanel({
     onHistoryChange?.(next);
   };
 
-  const handleReview = () => {
+  const handleReview = (focusOverride?: ReviewFocus | null) => {
     startReview(async () => {
-      const result = await reviewArticle(postId);
+      const reviewFocus = focusOverride ?? focus;
+      const result = await reviewArticle(
+        postId,
+        reviewFocus ?? undefined,
+      );
 
       if (!result.ok) {
         toast({
@@ -113,6 +128,7 @@ export default function ArticleReviewPanel({
       }
 
       setActive(result.review);
+      setFocus(result.review.focus ?? reviewFocus ?? null);
       setSelected({
         title: Boolean(result.review.suggested?.title),
         description: Boolean(result.review.suggested?.description),
@@ -131,6 +147,7 @@ export default function ArticleReviewPanel({
             warningCount: result.review.findings.filter(
               (finding) => finding.severity === "warning",
             ).length,
+            feedbackTitle: result.review.focus?.title ?? null,
             createdAt: result.review.createdAt,
           },
           ...prev,
@@ -151,6 +168,20 @@ export default function ArticleReviewPanel({
       });
     });
   };
+
+  const autoStarted = useRef(false);
+
+  useEffect(() => {
+    if (!autoStart || !initialFocus || autoStarted.current) {
+      return;
+    }
+
+    autoStarted.current = true;
+    window.history.replaceState(null, "", `/admin/edit/${postId}?tab=review`);
+    handleReview(initialFocus);
+    // The review should start exactly once for the deep link.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStart, initialFocus, postId]);
 
   const handleApply = () => {
     if (!active) {
@@ -227,6 +258,7 @@ export default function ArticleReviewPanel({
       }
 
       setActive(result.review);
+      setFocus(result.review.focus ?? null);
       setSelected({
         title: Boolean(result.review.suggested?.title),
         description: Boolean(result.review.suggested?.description),
@@ -247,7 +279,8 @@ export default function ArticleReviewPanel({
           </h2>
           <p className="mt-1 text-sm text-ink-muted">
             Audits accuracy, code, SEO, and structure, and proposes corrections
-            you can apply per field.
+            you can apply per field. When started from Search Console, the
+            attached feedback is the review brief.
           </p>
           <p className="mt-1 flex flex-wrap items-center gap-2 text-[13px] text-ink-muted">
             <span>Reviewed by {reviewModelLabel}</span>
@@ -268,7 +301,7 @@ export default function ArticleReviewPanel({
 
         <button
           type="button"
-          onClick={handleReview}
+          onClick={() => handleReview()}
           disabled={isReviewing || isApplying}
           className="inline-flex h-11 items-center gap-1.5 rounded bg-primary px-4 text-sm font-medium text-primary-foreground transition-[background-color,transform] hover:bg-[var(--clay-deep-hover)] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
         >
@@ -277,7 +310,13 @@ export default function ArticleReviewPanel({
           ) : (
             <Sparkle size={14} aria-hidden="true" />
           )}
-          <span>{isReviewing ? "Reviewing..." : "Review article"}</span>
+          <span>
+            {isReviewing
+              ? "Reviewing..."
+              : activeFocus
+                ? "Review again"
+                : "Review article"}
+          </span>
         </button>
       </header>
 
@@ -286,6 +325,39 @@ export default function ArticleReviewPanel({
           The reviewer reads the article and checks its claims. This can take up
           to a minute.
         </p>
+      ) : null}
+
+      {activeFocus ? (
+        <div className="rounded border border-border border-l-2 border-l-[var(--clay)] bg-surface p-4">
+          <p className="eyebrow text-ink-faint">Search Console feedback</p>
+          <p className="mt-1 text-sm font-medium text-foreground">
+            {activeFocus.title}
+          </p>
+          <p className="mt-1 text-[13px] leading-relaxed text-ink-muted">
+            {activeFocus.action}
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px] text-ink-faint">
+            <span>
+              {activeFocus.range.startDate} to {activeFocus.range.endDate}
+            </span>
+            {activeFocus.section ? (
+              <span>section: {activeFocus.section}</span>
+            ) : null}
+            {activeFocus.metrics ? (
+              <span>
+                {activeFocus.metrics.clicks} clicks ·{" "}
+                {activeFocus.metrics.impressions} impressions ·{" "}
+                {(activeFocus.metrics.ctr * 100).toFixed(2)}% CTR · position{" "}
+                {activeFocus.metrics.position.toFixed(1)}
+              </span>
+            ) : null}
+          </div>
+          {activeFocus.queries.length > 0 ? (
+            <p className="mt-2 text-[13px] text-ink-muted">
+              Queries: {activeFocus.queries.join(", ")}
+            </p>
+          ) : null}
+        </div>
       ) : null}
 
       {active ? (
@@ -616,6 +688,11 @@ export default function ArticleReviewPanel({
                   <span className="ml-3 font-mono text-[11px] text-ink-faint">
                     {item.findingCount} findings
                   </span>
+                  {item.feedbackTitle ? (
+                    <span className="ml-3 font-mono text-[10px] uppercase tracking-[0.08em] text-[var(--clay)]">
+                      GSC feedback
+                    </span>
+                  ) : null}
                 </span>
                 <button
                   type="button"

@@ -8,6 +8,7 @@ export const REVIEW_VARIABLES = [
   "articleTags",
   "articleContent",
   "searchResults",
+  "searchConsoleFeedback",
   "publishedPosts",
   "authorProfile",
 ] as const;
@@ -22,6 +23,7 @@ export type ReviewContextValues = {
   articleTags: string;
   articleContent: string;
   searchResults: string;
+  searchConsoleFeedback: string;
   publishedPosts: string;
   authorProfile: string;
 };
@@ -30,9 +32,18 @@ const REVIEW_SYSTEM_PROMPT = `You are the technical editor and SEO reviewer for 
 
 WHAT YOU RECEIVE
 - One article: title, description, slug, primary keyword, keywords, tags, and full HTML content.
+- SEARCH CONSOLE FEEDBACK: an optional operator brief for this review. It names a page, the section to improve, the query cluster, and the measured clicks, impressions, CTR, and position. It may be empty.
 - WEB SEARCH RESULTS: snippets and URLs from a live search on the article's topics. This is the only external verification material you have. It may be empty.
 - PUBLISHED POSTS: the only valid internal link targets.
 - AUTHOR PROFILE: the only personal or experience claims the author can support.
+
+SEARCH CONSOLE FEEDBACK PROTOCOL
+- When SEARCH CONSOLE FEEDBACK is present, address it first. It is the reason this review was started.
+- Verify the feedback against the article and the search evidence rather than applying it blindly. If the article already satisfies the requested change, say so and do not invent a defect.
+- Focus the findings and the rewrite on the named page and section. Keep unrelated, accurate content unchanged.
+- For a title or meta description request, propose a replacement that serves the query cluster while staying within the 35 to 50 character title target and the 120 to 155 character description target.
+- For an on-page section request, add or tighten the specific explanation, comparison, example, or H2 the feedback asks for. Do not pad the article or rewrite it wholesale.
+- If the feedback is contradicted by evidence, explain the conflict in a finding instead of forcing the change.
 
 REVIEW PROTOCOL (do this before writing output)
 1. Claims. Extract every checkable factual claim: version behavior, API signatures, defaults, limits, prices, dates, standards, security advice. For each, decide:
@@ -61,6 +72,7 @@ Return exactly one JSON object and nothing else:
 
 REWRITE RULES
 - Apply minimal necessary corrections. Keep accurate sentences, the author's voice, and the article's structure. Do not restyle, expand, or pad. Never remove correct content.
+- When SEARCH CONSOLE FEEDBACK is present, the rewrite must address the named section and query cluster. Leave parts of the article that are unrelated to that feedback alone.
 - The rewritten content obeys the same HTML contract: fragment only, allowed tags and classes, no h1, escaped code, no inline styles, no em or en dash.
 - Internal links only to published slugs from PUBLISHED POSTS. External links only to URLs present in WEB SEARCH RESULTS or the documentation allowlist (laravel.com, php.net, postgresql.org, developer.mozilla.org, redis.io, docker.com).
 - Never add personal experience, numbers, or sources not supported by the AUTHOR PROFILE or the provided sources.
@@ -84,6 +96,11 @@ Content:
 <article-content>
 {{articleContent}}
 </article-content>
+
+SEARCH CONSOLE FEEDBACK (the operator brief; may be empty)
+<search-console-feedback>
+{{searchConsoleFeedback}}
+</search-console-feedback>
 
 WEB SEARCH RESULTS (the only external verification material; may be empty)
 <search-results>

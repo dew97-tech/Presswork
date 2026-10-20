@@ -1,10 +1,18 @@
 "use client";
 
 import { analyzeSearchPerformance } from "@/app/lib/google/gsc-actions";
+import {
+  extractBlogSlug,
+  makeFeedbackKey,
+  type FeedbackKind,
+  type FeedbackReviewMap,
+  type FeedbackReviewState,
+} from "@/app/lib/google/feedback";
 import type { LastAnalysis } from "@/app/lib/settings";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { CircleNotch, Sparkle } from "@phosphor-icons/react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
@@ -14,12 +22,51 @@ const IMPACT_CLASSES: Record<string, string> = {
   low: "border-l-2 border-l-border",
 };
 
+const REVIEW_STATUS_LABELS: Record<string, string> = {
+  completed: "Review ready",
+  applied: "Applied",
+  discarded: "Discarded",
+  failed: "Failed",
+};
+
+function ReviewStatusBadge({ review }: { review: FeedbackReviewState }) {
+  return (
+    <span
+      className={cn(
+        "font-mono text-[10px] uppercase tracking-[0.08em]",
+        review.status === "applied"
+          ? "text-ok"
+          : review.status === "failed"
+            ? "text-danger"
+            : review.status === "completed"
+              ? "text-warn"
+              : "text-ink-faint",
+      )}
+    >
+      {REVIEW_STATUS_LABELS[review.status] ?? review.status}
+      {review.status === "completed" && review.errorCount > 0
+        ? ` · ${review.errorCount} errors`
+        : ""}
+    </span>
+  );
+}
+
+interface PublishedPost {
+  id: string;
+  slug: string;
+  title: string;
+}
+
 export default function SearchAnalysisPanel({
   initial,
   range,
+  publishedPosts,
+  feedbackReviews,
 }: {
   initial: LastAnalysis | null;
   range: { preset: string; startDate: string; endDate: string };
+  publishedPosts: PublishedPost[];
+  feedbackReviews: FeedbackReviewMap;
 }) {
   const { toast } = useToast();
   const router = useRouter();
@@ -65,6 +112,98 @@ export default function SearchAnalysisPanel({
       ? `${(current.inputTokens ?? 0).toLocaleString("en-US")} in / ${(current.outputTokens ?? 0).toLocaleString("en-US")} out`
       : null;
 
+  const postsBySlug = new Map(
+    publishedPosts.map((post) => [post.slug, post] as const),
+  );
+  const activeReviews =
+    current && initial && current.generatedAt === initial.generatedAt
+      ? feedbackReviews
+      : {};
+  const generatedAt = current?.generatedAt ?? null;
+
+  const targetFor = (item: {
+    title: string;
+    page?: string | null;
+    why?: string;
+    action: string;
+  }) => {
+    const slug =
+      extractBlogSlug(item.page) ??
+      extractBlogSlug(`${item.title} ${item.why ?? ""} ${item.action}`);
+    return slug ? (postsBySlug.get(slug) ?? null) : null;
+  };
+
+  const renderReviewActions = (
+    kind: FeedbackKind,
+    index: number,
+    item: {
+      title: string;
+      page?: string | null;
+      why?: string;
+      action: string;
+    },
+  ) => {
+    if (!generatedAt) return null;
+
+    const target = targetFor(item);
+    const feedbackKey = makeFeedbackKey(kind, index);
+
+    if (!target) {
+      return (
+        <div className="mt-3 flex flex-wrap items-center gap-3 text-[13px] text-ink-muted">
+          <span>
+            {item.page ? (
+              <>
+                No published article matches{" "}
+                <span className="font-mono text-[11px]">{item.page}</span>.
+              </>
+            ) : (
+              "This is a content gap."
+            )}
+          </span>
+          <Link
+            href="/admin/new"
+            className="inline-flex h-9 items-center rounded border border-border px-3 text-[13px] text-ink-muted transition-colors hover:text-foreground"
+          >
+            Create article
+          </Link>
+        </div>
+      );
+    }
+
+    const review = activeReviews[feedbackKey];
+    const runHref = `/admin/edit/${target.id}?tab=review&analysis=${encodeURIComponent(generatedAt)}&feedback=${encodeURIComponent(feedbackKey)}`;
+    const viewHref = review
+      ? `/admin/edit/${target.id}?tab=review&review=${encodeURIComponent(review.id)}`
+      : runHref;
+
+    return (
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <Link
+          href={viewHref}
+          className="inline-flex h-9 items-center gap-1.5 rounded bg-primary px-3 text-[13px] font-medium text-primary-foreground transition-[background-color,transform] hover:bg-[var(--clay-deep-hover)] active:scale-[0.98]"
+        >
+          <Sparkle size={13} aria-hidden="true" />
+          <span>{review ? "View review" : "Review with this feedback"}</span>
+        </Link>
+
+        {review ? (
+          <Link
+            href={runHref}
+            className="inline-flex h-9 items-center rounded border border-border px-3 text-[13px] text-ink-muted transition-colors hover:text-foreground"
+          >
+            {review.status === "failed" ? "Retry review" : "Review again"}
+          </Link>
+        ) : null}
+
+        <span className="text-[13px] text-ink-muted">
+          Article: <span className="text-foreground">{target.title}</span>
+        </span>
+        {review ? <ReviewStatusBadge review={review} /> : null}
+      </div>
+    );
+  };
+
   return (
     <section className="rounded-lg border border-border bg-card p-6">
       <header className="flex flex-wrap items-start justify-between gap-3">
@@ -75,7 +214,8 @@ export default function SearchAnalysisPanel({
           <p className="mt-1 max-w-prose text-sm text-ink-muted">
             Turns the Search Console digest for {range.startDate} to{" "}
             {range.endDate} into prioritized actions with the configured
-            analysis model.
+            analysis model. Each recommendation can start a review of the
+            matched article with that feedback attached.
           </p>
         </div>
 
@@ -145,12 +285,40 @@ export default function SearchAnalysisPanel({
                     <p className="mt-1.5 text-[13px] leading-relaxed text-ink-muted">
                       {priority.why}
                     </p>
+                    {priority.section ||
+                    priority.queries.length > 0 ||
+                    priority.metrics ? (
+                      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-ink-muted">
+                        {priority.section ? (
+                          <span>
+                            Part:{" "}
+                            <span className="text-foreground">
+                              {priority.section}
+                            </span>
+                          </span>
+                        ) : null}
+                        {priority.queries.length > 0 ? (
+                          <span className="font-mono text-[11px] text-ink-faint">
+                            queries: {priority.queries.join(", ")}
+                          </span>
+                        ) : null}
+                        {priority.metrics ? (
+                          <span className="font-mono text-[11px] text-ink-faint">
+                            {priority.metrics.clicks} clicks ·{" "}
+                            {priority.metrics.impressions} impressions ·{" "}
+                            {(priority.metrics.ctr * 100).toFixed(2)}% CTR ·
+                            position {priority.metrics.position.toFixed(1)}
+                          </span>
+                        ) : null}
+                      </div>
+                    ) : null}
                     <p className="mt-2 text-[13px] leading-relaxed text-foreground">
                       <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-faint">
                         Action{" "}
                       </span>
                       {priority.action}
                     </p>
+                    {renderReviewActions("priority", index, priority)}
                   </li>
                 ))}
               </ol>
@@ -164,13 +332,25 @@ export default function SearchAnalysisPanel({
                 {analysis.quickWins.map((win, index) => (
                   <li
                     key={`${win.title}-${index}`}
-                    className="flex items-start gap-2 text-[13px] leading-relaxed text-ink-muted"
+                    className="rounded border border-border bg-surface px-4 py-3 text-[13px] leading-relaxed text-ink-muted"
                   >
-                    <span className="mt-1 h-1 w-1 shrink-0 rounded-full bg-ink-faint" />
-                    <span>
+                    <p>
                       <span className="text-foreground">{win.title}</span>{" "}
                       {win.action}
-                    </span>
+                    </p>
+                    {win.queries.length > 0 ? (
+                      <p className="mt-1 font-mono text-[11px] text-ink-faint">
+                        queries: {win.queries.join(", ")}
+                      </p>
+                    ) : null}
+                    {win.metrics ? (
+                      <p className="mt-1 font-mono text-[11px] text-ink-faint">
+                        {win.metrics.clicks} clicks · {win.metrics.impressions}{" "}
+                        impressions · {(win.metrics.ctr * 100).toFixed(2)}% CTR ·
+                        position {win.metrics.position.toFixed(1)}
+                      </p>
+                    ) : null}
+                    {renderReviewActions("quickWin", index, win)}
                   </li>
                 ))}
               </ul>

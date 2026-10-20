@@ -323,6 +323,18 @@ export async function fetchByDimension(
   });
 }
 
+export async function fetchPageQueryPairs(
+  range: GscDateRange,
+  limit = 5000,
+): Promise<GscRow[]> {
+  return gscQuery({
+    startDate: range.startDate,
+    endDate: range.endDate,
+    dimensions: ["page", "query"],
+    rowLimit: limit,
+  });
+}
+
 export async function inspectUrl(
   inspectionUrl: string,
 ): Promise<UrlInspectionResult> {

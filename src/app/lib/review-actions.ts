@@ -35,6 +35,7 @@ async function requireAdmin(): Promise<boolean> {
 
 export async function reviewArticle(
   postId: string,
+  focus?: unknown,
 ): Promise<ReviewActionResult> {
   if (!(await requireAdmin())) {
     return { ok: false, error: "Unauthorized" };
@@ -45,8 +46,10 @@ export async function reviewArticle(
   }
 
   try {
-    const review = await runArticleReview(postId);
+    const review = await runArticleReview(postId, focus);
     revalidatePath("/admin");
+    revalidatePath("/admin/search-console");
+    revalidatePath(`/admin/edit/${postId}`);
     return { ok: true, review };
   } catch (error) {
     return {
@@ -133,6 +136,8 @@ export async function applyReview(
   });
 
   revalidatePostSurfaces(post.slug);
+  revalidatePath("/admin/search-console");
+  revalidatePath(`/admin/edit/${review.postId}`);
   return { ok: true };
 }
 
@@ -151,6 +156,7 @@ export async function discardReview(
     .catch(() => undefined);
 
   revalidatePath("/admin");
+  revalidatePath("/admin/search-console");
   return { ok: true };
 }
 

@@ -14,11 +14,19 @@ import {
 } from "@/app/lib/google/search-console";
 import prisma from "@/app/lib/prisma";
 import {
+  buildFeedbackReviewMap,
+  type FeedbackReviewMap,
+} from "@/app/lib/google/feedback";
+import {
   getGscProperty,
+  getCoverageSnapshot,
   getLastAnalysis,
   getLastIndexSyncAt,
+  getPerformanceSnapshot,
   type LastAnalysis,
 } from "@/app/lib/settings";
+import CoveragePanel from "@/app/ui/coverage-panel";
+import PerformanceImportPanel from "@/app/ui/performance-import-panel";
 import SearchAnalysisPanel from "@/app/ui/search-analysis-panel";
 import SyncIndexButton from "@/app/ui/sync-index-button";
 import { cn } from "@/lib/utils";
@@ -478,9 +486,22 @@ export default async function SearchConsolePage({
       : "clicks";
   const dir = firstValue(params.dir) === "asc" ? "asc" : "desc";
 
-  const [property, connection] = await Promise.all([
+  const [
+    property,
+    connection,
+    publishedPosts,
+    performanceSnapshot,
+    coverageSnapshot,
+  ] = await Promise.all([
     getGscProperty(),
     getGoogleConnectionSummary(),
+    prisma.post.findMany({
+      where: { published: true },
+      select: { id: true, slug: true, title: true },
+      orderBy: { publishedAt: "desc" },
+    }),
+    getPerformanceSnapshot(),
+    getCoverageSnapshot(),
   ]);
 
   const baseParams: Record<string, string | undefined> = {
@@ -565,6 +586,33 @@ export default async function SearchConsolePage({
   }
 
   const indexedCount = indexRows?.filter((row) => isIndexedStatus(row.indexStatus)).length ?? 0;
+
+  let feedbackReviews: FeedbackReviewMap = {};
+  if (lastAnalysis && publishedPosts.length > 0) {
+    const since = new Date(lastAnalysis.generatedAt);
+    if (!Number.isNaN(since.getTime())) {
+      const reviews = await prisma.articleReview.findMany({
+        where: {
+          postId: { in: publishedPosts.map((post) => post.id) },
+          createdAt: { gte: since },
+        },
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          postId: true,
+          status: true,
+          focus: true,
+          findings: true,
+          createdAt: true,
+        },
+      });
+
+      feedbackReviews = buildFeedbackReviewMap(
+        reviews,
+        lastAnalysis.generatedAt,
+      );
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -1013,6 +1061,20 @@ export default async function SearchConsolePage({
               startDate: range.startDate,
               endDate: range.endDate,
             }}
+            publishedPosts={publishedPosts}
+            feedbackReviews={feedbackReviews}
+          />
+
+          <PerformanceImportPanel
+            importedAt={performanceSnapshot?.importedAt ?? null}
+            pageCount={performanceSnapshot?.pages.length ?? 0}
+            queryCount={performanceSnapshot?.queries.length ?? 0}
+          />
+
+          <CoveragePanel
+            snapshot={coverageSnapshot}
+            publishedPosts={publishedPosts}
+            property={property}
           />
         </>
       )}
