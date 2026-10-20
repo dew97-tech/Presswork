@@ -7,6 +7,10 @@ import {
   DEFAULT_REVIEW_MODEL,
   REASONING_EFFORTS,
 } from "@/app/lib/ai/models";
+import {
+  coverageSnapshotSchema,
+  type CoverageSnapshot,
+} from "@/app/lib/google/coverage";
 
 const reasoningEffortSchema = z.enum(REASONING_EFFORTS);
 
@@ -61,6 +65,8 @@ export const SETTINGS_KEYS = {
   keywordsPlanner: "keywords.planner",
   keywordsLastSyncAt: "keywords.lastSyncAt",
   lastAnalysis: "gsc.lastAnalysis",
+  performanceSnapshot: "gsc.performanceSnapshot",
+  coverageSnapshot: "gsc.coverageSnapshot",
   lastIndexSyncAt: "gsc.lastIndexSyncAt",
   googleAccounts: "google.accounts",
   googleActiveAccount: "google.activeAccount",
@@ -142,6 +148,13 @@ export async function getLastIndexSyncAt(): Promise<string | null> {
   return readSetting(SETTINGS_KEYS.lastIndexSyncAt, z.string().nullable(), null);
 }
 
+const analysisMetricsSchema = z.object({
+  clicks: z.number().catch(0),
+  impressions: z.number().catch(0),
+  ctr: z.number().catch(0),
+  position: z.number().catch(0),
+});
+
 export const lastAnalysisSchema = z.object({
   generatedAt: z.string(),
   model: z.string(),
@@ -155,12 +168,24 @@ export const lastAnalysisSchema = z.object({
     priorities: z.array(
       z.object({
         title: z.string(),
+        page: z.string().nullish().catch(null),
+        section: z.string().nullish().catch(null),
+        queries: z.array(z.string()).catch([]),
+        metrics: analysisMetricsSchema.nullish().catch(null),
         why: z.string(),
         action: z.string(),
         impact: z.enum(["high", "medium", "low"]).catch("medium"),
       }),
     ),
-    quickWins: z.array(z.object({ title: z.string(), action: z.string() })),
+    quickWins: z.array(
+      z.object({
+        title: z.string(),
+        page: z.string().nullish().catch(null),
+        queries: z.array(z.string()).catch([]),
+        metrics: analysisMetricsSchema.nullish().catch(null),
+        action: z.string(),
+      }),
+    ),
   }),
   inputTokens: z.number().nullish(),
   outputTokens: z.number().nullish(),
@@ -173,6 +198,38 @@ export async function getLastAnalysis(): Promise<LastAnalysis | null> {
   return readSetting(
     SETTINGS_KEYS.lastAnalysis,
     lastAnalysisSchema.nullable(),
+    null,
+  );
+}
+
+const performanceRowSchema = z.object({
+  key: z.string().min(1).max(1200),
+  clicks: z.number().catch(0),
+  impressions: z.number().catch(0),
+  ctr: z.number().catch(0),
+  position: z.number().catch(0),
+});
+
+export const performanceSnapshotSchema = z.object({
+  importedAt: z.string(),
+  pages: z.array(performanceRowSchema).max(2000),
+  queries: z.array(performanceRowSchema).max(2000),
+});
+
+export type PerformanceSnapshot = z.infer<typeof performanceSnapshotSchema>;
+
+export async function getPerformanceSnapshot(): Promise<PerformanceSnapshot | null> {
+  return readSetting(
+    SETTINGS_KEYS.performanceSnapshot,
+    performanceSnapshotSchema.nullable(),
+    null,
+  );
+}
+
+export async function getCoverageSnapshot(): Promise<CoverageSnapshot | null> {
+  return readSetting(
+    SETTINGS_KEYS.coverageSnapshot,
+    coverageSnapshotSchema.nullable(),
     null,
   );
 }

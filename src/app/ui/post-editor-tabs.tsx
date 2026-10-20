@@ -1,6 +1,7 @@
 "use client";
 
-import type { ReviewHistoryItem } from "@/app/lib/ai/review-article";
+import type { ReviewHistoryItem, ReviewResult } from "@/app/lib/ai/review-article";
+import type { ReviewFocus } from "@/app/lib/google/feedback";
 import ArticleReviewPanel from "@/app/ui/article-review-panel";
 import PostForm from "@/app/ui/post-form";
 import { cn } from "@/lib/utils";
@@ -14,14 +15,22 @@ export default function PostEditorTabs({
   initialHistory,
   reviewModelLabel,
   webSearchConfigured,
+  initialTab = "write",
+  initialFocus = null,
+  initialReview = null,
+  autoStart = false,
 }: {
   post: PostFormPost;
   current: { title: string; description: string };
   initialHistory: ReviewHistoryItem[];
   reviewModelLabel: string;
   webSearchConfigured: boolean;
+  initialTab?: "write" | "review";
+  initialFocus?: ReviewFocus | null;
+  initialReview?: ReviewResult | null;
+  autoStart?: boolean;
 }) {
-  const [activeTab, setActiveTab] = useState<"write" | "review">("write");
+  const [activeTab, setActiveTab] = useState<"write" | "review">(initialTab);
   const [history, setHistory] = useState<ReviewHistoryItem[]>(initialHistory);
 
   const latest = history.find(
@@ -94,6 +103,9 @@ export default function PostEditorTabs({
           initialHistory={initialHistory}
           reviewModelLabel={reviewModelLabel}
           webSearchConfigured={webSearchConfigured}
+          initialFocus={initialFocus}
+          initialReview={initialReview}
+          autoStart={autoStart}
           onHistoryChange={setHistory}
         />
       </div>
