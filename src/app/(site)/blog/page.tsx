@@ -1,7 +1,7 @@
 import prisma from "@/app/lib/prisma";
 import { publishedDate } from "@/app/lib/post-dates";
 import { getSiteUrl } from "@/app/lib/site";
-import { displayTag, getIndexableTagSlugs } from "@/app/lib/tags";
+import { displayTag, isIndexableTagSummary, loadTagSummaries } from "@/app/lib/tags";
 import { slugify } from "@/app/lib/slug";
 import BlogPagination from "@/app/ui/blog-pagination";
 import BlogSearch from "@/app/ui/blog-search";
@@ -57,7 +57,19 @@ export default async function BlogPage({
 }) {
   const params = await searchParams;
   const query = params?.query || "";
-  const currentPage = Number(params?.page) || 1;
+  const currentPage = Math.max(1, Number(params?.page) || 1);
+
+  const tagSummaries = await loadTagSummaries();
+  const indexableTagSlugs = new Set(
+    tagSummaries
+      .filter((summary) => isIndexableTagSummary(summary))
+      .map((summary) => summary.slug),
+  );
+  const matchedTags = query
+    ? tagSummaries
+        .flatMap((summary) => summary.variants)
+        .filter((tag) => tag.toLowerCase().includes(query.toLowerCase()))
+    : [];
 
   const where = {
     published: true,
@@ -65,14 +77,15 @@ export default async function BlogPage({
       OR: [
         { title: { contains: query, mode: "insensitive" as const } },
         { description: { contains: query, mode: "insensitive" as const } },
-        { tags: { hasSome: [query] } },
+        ...(matchedTags.length > 0
+          ? [{ tags: { hasSome: matchedTags } }]
+          : []),
       ],
     }),
   };
 
   const totalPosts = await prisma.post.count({ where });
   const totalPages = Math.ceil(totalPosts / POSTS_PER_PAGE);
-  const indexableTagSlugs = await getIndexableTagSlugs();
 
   const posts = await prisma.post.findMany({
     where,

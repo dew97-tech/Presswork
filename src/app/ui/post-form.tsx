@@ -13,7 +13,7 @@ import {
   UploadSimple,
   X,
 } from "@phosphor-icons/react";
-import { useRef, useState } from "react";
+import { useActionState, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import ImagePromptPanel from "./image-prompt-panel";
 import TiptapEditor from "./tiptap-editor";
@@ -32,6 +32,39 @@ interface EditablePost {
   keywords?: string[] | null;
 }
 
+interface SaveState {
+  message?: string;
+  errors?: Record<string, string[] | undefined>;
+}
+
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const UPLOAD_TIMEOUT_MS = 90_000;
+const ACCEPTED_IMAGE_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+];
+const ALLOWED_THUMBNAIL_HOST_SUFFIX = ".public.blob.vercel-storage.com";
+const ALLOWED_THUMBNAIL_HOSTS = new Set(["images.unsplash.com"]);
+
+function isAllowedThumbnailUrl(value: string): boolean {
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.startsWith("/")) return true;
+
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== "https:") return false;
+
+    return (
+      parsed.hostname.endsWith(ALLOWED_THUMBNAIL_HOST_SUFFIX) ||
+      ALLOWED_THUMBNAIL_HOSTS.has(parsed.hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
 export default function PostForm({ post }: { post?: EditablePost }) {
   const { toast } = useToast();
   const [title, setTitle] = useState(post?.title || "");
@@ -46,7 +79,10 @@ export default function PostForm({ post }: { post?: EditablePost }) {
   );
   const [tagInput, setTagInput] = useState("");
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [urlWarning, setUrlWarning] = useState(false);
   const inputFileRef = useRef<HTMLInputElement>(null);
+  const uploadAbortRef = useRef<AbortController | null>(null);
 
   const generateSlug = (text: string) => {
     return text
@@ -91,64 +127,147 @@ export default function PostForm({ post }: { post?: EditablePost }) {
     if (!event.target.files || event.target.files.length === 0) return;
 
     const file = event.target.files[0];
+
+    if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
+      toast({
+        variant: "error",
+        label: "Unsupported file",
+        title: "Use a JPEG, PNG, GIF, or WebP image.",
+      });
+      event.target.value = "";
+      return;
+    }
+
+    if (file.size > MAX_UPLOAD_BYTES) {
+      toast({
+        variant: "error",
+        label: "File too large",
+        title: `Images must be under 10 MB. This one is ${(file.size / (1024 * 1024)).toFixed(1)} MB.`,
+      });
+      event.target.value = "";
+      return;
+    }
+
     const previousUrl = thumbnailUrl;
+    const controller = new AbortController();
+    const abortState = { reason: "cancel" as "cancel" | "timeout" };
+    const watchdog = window.setTimeout(() => {
+      abortState.reason = "timeout";
+      controller.abort();
+    }, UPLOAD_TIMEOUT_MS);
+
     setIsUploading(true);
+    setUploadProgress(0);
+    uploadAbortRef.current = controller;
 
     try {
       const newBlob = await upload(file.name, file, {
         access: "public",
         handleUploadUrl: "/api/upload",
+        abortSignal: controller.signal,
+        onUploadProgress: ({ percentage }) => {
+          setUploadProgress(Math.min(99, Math.round(percentage)));
+        },
       });
       setThumbnailUrl(newBlob.url);
       if (previousUrl && previousUrl !== newBlob.url) {
         discardUploadedBlob(previousUrl).catch(() => undefined);
       }
+      toast({
+        variant: "success",
+        label: "Uploaded",
+        title: "Cover image uploaded.",
+      });
     } catch (error) {
       console.error("Upload failed:", error);
-      const raw = error instanceof Error ? error.message : "Upload failed";
-      const message = /access denied|valid token/i.test(raw)
-        ? "The Blob store rejected the upload token. Ask the site owner to rotate BLOB_READ_WRITE_TOKEN"
-        : raw;
-      toast({
-        variant: "error",
-        label: "Upload failed",
-        title: `${message}. Paste an image URL instead.`,
-      });
+
+      if (controller.signal.aborted) {
+        if (abortState.reason === "timeout") {
+          toast({
+            variant: "error",
+            label: "Upload timed out",
+            title:
+              "The upload did not finish within 90 seconds. Check your connection and try again.",
+          });
+        } else {
+          toast({
+            variant: "info",
+            label: "Cancelled",
+            title: "Cover image upload cancelled.",
+          });
+        }
+      } else {
+        const raw = error instanceof Error ? error.message : "Upload failed";
+        const message = /access denied|valid token/i.test(raw)
+          ? "The Blob store rejected the upload token. Ask the site owner to rotate BLOB_READ_WRITE_TOKEN"
+          : raw;
+        toast({
+          variant: "error",
+          label: "Upload failed",
+          title: `${message}. Paste an image URL instead.`,
+        });
+      }
     } finally {
+      window.clearTimeout(watchdog);
+      uploadAbortRef.current = null;
       setIsUploading(false);
+      setUploadProgress(null);
       event.target.value = "";
     }
+  };
+
+  const handleCancelUpload = () => {
+    uploadAbortRef.current?.abort();
   };
 
   const handleRemoveThumbnail = () => {
     const removedUrl = thumbnailUrl;
     setThumbnailUrl("");
+    setUrlWarning(false);
     if (removedUrl) {
       discardUploadedBlob(removedUrl).catch(() => undefined);
     }
   };
 
-  const handleSubmit = async (formData: FormData) => {
-    formData.set("title", title);
-    formData.set("slug", slug);
-    formData.set("description", description);
-    formData.set("thumbnail", thumbnailUrl);
-    formData.set("content", content);
-    formData.set("published", isPublished ? "true" : "false");
-    formData.set("readTime", readTime);
-    formData.set("tags", tags.join(", "));
-
-    if (post) {
-      await updatePost(post.id, null, formData);
-    } else {
-      await createPost(null, formData);
-    }
+  const handleThumbnailUrlChange = (value: string) => {
+    setThumbnailUrl(value);
+    setUrlWarning(
+      value.trim().length > 0 && !isAllowedThumbnailUrl(value),
+    );
   };
+
+  const [saveState, saveFormAction] = useActionState<SaveState | null, FormData>(
+    async (_prev, formData) => {
+      formData.set("title", title);
+      formData.set("slug", slug);
+      formData.set("description", description);
+      formData.set("thumbnail", thumbnailUrl);
+      formData.set("content", content);
+      formData.set("published", isPublished ? "true" : "false");
+      formData.set("readTime", readTime);
+      formData.set("tags", tags.join(", "));
+
+      const result = post
+        ? await updatePost(post.id, _prev, formData)
+        : await createPost(_prev, formData);
+
+      if (result?.message) {
+        toast({
+          variant: "error",
+          label: "Save failed",
+          title: result.message,
+        });
+      }
+
+      return result ?? null;
+    },
+    null,
+  );
 
   const fieldLabel = "block text-sm font-medium text-foreground";
 
   return (
-    <form action={handleSubmit} className="space-y-8">
+    <form action={saveFormAction} className="space-y-8">
       <h1 className="font-serif text-2xl tracking-[-0.01em] text-foreground">
         {post ? "Edit post" : "New post"}
       </h1>
@@ -196,6 +315,11 @@ export default function PostForm({ post }: { post?: EditablePost }) {
                     className="flex-1 border-none bg-transparent font-mono text-[13px] text-foreground outline-none"
                   />
                 </div>
+                {saveState?.errors?.slug?.length ? (
+                  <p className="text-[13px] text-destructive">
+                    {saveState.errors.slug[0]}
+                  </p>
+                ) : null}
               </div>
 
               <div className="space-y-2">
@@ -278,6 +402,14 @@ export default function PostForm({ post }: { post?: EditablePost }) {
             </div>
 
             <div className="space-y-2 border-t border-border pt-4">
+              {saveState?.message ? (
+                <p
+                  role="alert"
+                  className="rounded border border-destructive/40 bg-destructive/10 px-3 py-2 text-[13px] leading-relaxed text-destructive"
+                >
+                  {saveState.message}
+                </p>
+              ) : null}
               <SubmitButton isPublished={isPublished} />
               {post?.slug && (
                 <a
@@ -321,11 +453,18 @@ export default function PostForm({ post }: { post?: EditablePost }) {
                   id="cover-url"
                   type="text"
                   value={thumbnailUrl}
-                  onChange={(e) => setThumbnailUrl(e.target.value)}
+                  onChange={(e) => handleThumbnailUrlChange(e.target.value)}
                   placeholder="Image URL"
                   spellCheck={false}
                   className="w-full rounded border border-input bg-surface px-3 py-1.5 font-mono text-[13px] text-ink-muted"
                 />
+                {urlWarning ? (
+                  <p className="text-[12px] leading-relaxed text-warn">
+                    This host is not allowed for blog images, so the cover may
+                    not display. Upload the file instead, or paste a Blob store
+                    or Unsplash URL.
+                  </p>
+                ) : null}
               </div>
             ) : (
               <div className="space-y-3">
@@ -335,25 +474,51 @@ export default function PostForm({ post }: { post?: EditablePost }) {
                     aria-hidden="true"
                     className="mx-auto text-ink-faint"
                   />
-                  <p className="mt-2 text-[13px] text-ink-muted">
-                    Upload a file or paste a URL
-                  </p>
-                  <label
-                    htmlFor="thumbnail-upload"
-                    className="mt-3 inline-flex h-8 cursor-pointer items-center gap-1.5 rounded border border-border px-3 text-[13px] text-ink-muted transition-colors hover:text-foreground"
-                  >
-                    {isUploading ? (
-                      <>
-                        <CircleNotch size={14} className="animate-spin" aria-hidden="true" />
-                        <span>Uploading…</span>
-                      </>
-                    ) : (
-                      <>
+                  {isUploading ? (
+                    <div className="mt-3 space-y-2" aria-live="polite">
+                      <p className="inline-flex items-center justify-center gap-1.5 text-[13px] text-ink-muted">
+                        <CircleNotch
+                          size={14}
+                          className="animate-spin"
+                          aria-hidden="true"
+                        />
+                        <span>Uploading… {uploadProgress ?? 0}%</span>
+                      </p>
+                      <div
+                        role="progressbar"
+                        aria-label="Cover image upload progress"
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={uploadProgress ?? 0}
+                        className="h-1 w-full overflow-hidden rounded bg-accent"
+                      >
+                        <div
+                          className="h-full rounded bg-primary transition-[width] duration-150"
+                          style={{ width: `${uploadProgress ?? 0}%` }}
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleCancelUpload}
+                        className="text-[13px] text-ink-muted transition-colors hover:text-destructive"
+                      >
+                        Cancel upload
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="mt-2 text-[13px] text-ink-muted">
+                        Upload a file or paste a URL
+                      </p>
+                      <label
+                        htmlFor="thumbnail-upload"
+                        className="mt-3 inline-flex h-8 cursor-pointer items-center gap-1.5 rounded border border-border px-3 text-[13px] text-ink-muted transition-colors hover:text-foreground"
+                      >
                         <UploadSimple size={14} aria-hidden="true" />
                         <span>Upload image</span>
-                      </>
-                    )}
-                  </label>
+                      </label>
+                    </>
+                  )}
                   <input
                     id="thumbnail-upload"
                     type="file"
@@ -370,11 +535,19 @@ export default function PostForm({ post }: { post?: EditablePost }) {
                   id="cover-url-new"
                   type="text"
                   value={thumbnailUrl}
-                  onChange={(e) => setThumbnailUrl(e.target.value)}
+                  onChange={(e) => handleThumbnailUrlChange(e.target.value)}
                   placeholder="Image URL"
                   spellCheck={false}
-                  className="w-full rounded border border-input bg-surface px-3 py-1.5 font-mono text-[13px] text-ink-muted"
+                  disabled={isUploading}
+                  className="w-full rounded border border-input bg-surface px-3 py-1.5 font-mono text-[13px] text-ink-muted disabled:opacity-50"
                 />
+                {urlWarning ? (
+                  <p className="text-[12px] leading-relaxed text-warn">
+                    This host is not allowed for blog images, so the cover may
+                    not display. Upload the file instead, or paste a Blob store
+                    or Unsplash URL.
+                  </p>
+                ) : null}
               </div>
             )}
 
@@ -455,7 +628,7 @@ function SubmitButton({ isPublished }: { isPublished: boolean }) {
       {pending ? (
         <>
           <CircleNotch size={15} className="animate-spin" aria-hidden="true" />
-          <span>Saving\u2026</span>
+          <span>Saving…</span>
         </>
       ) : (
         <>

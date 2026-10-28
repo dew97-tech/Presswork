@@ -46,8 +46,8 @@ WHAT THE IMAGE MUST DEPICT
 - Abstract texture, floating shapes, scattered dots, or decorative geometry on their own are not acceptable.
 - The scene must be drawn with objects only, so nothing in it needs a label to be understood.
 
-COMPOSITION
-- Landscape, 16:9 aspect ratio.
+COMPOSITION AND SIZE
+- Landscape, 16:9 aspect ratio, generated at exactly 1536x1024 pixels.
 - The subject sits near the centre with generous negative space around it.
 
 PROHIBITED
@@ -58,7 +58,7 @@ PROHIBITED
 - Branded products or app icons.
 
 WRITING THE PROMPT
-Write four to six sentences. Open by naming the concrete metaphor and the mechanism it expresses, then describe the main objects and how they interact, then the style using the ink, background, and monochrome tokens above, then the 16:9 centred composition with negative space, and close with the exclusions that matter most for this subject, always including no text, letters, or numbers and nothing suggesting artificial intelligence.`;
+Write four to six sentences. Open by naming the concrete metaphor and the mechanism it expresses, then describe the main objects and how they interact, then the style using the ink, background, and monochrome tokens above, then the 16:9 centred composition with negative space, stating the image size as 1536x1024 pixels, and close with the exclusions that matter most for this subject, always including no text, letters, or numbers and nothing suggesting artificial intelligence. The 1536x1024 size is a generation setting for the image model to follow, never text or numerals to render inside the image.`;
 
 function stripMarkup(html: string): string {
   return html
@@ -163,7 +163,7 @@ export function fallbackImagePrompt(input: ImagePromptInput): string {
     `Flat editorial illustration about ${subject}.`,
     "Show it as a small scene of clearly drawn objects, for example a stack, a tray, a pipe, or a container, with one thing being stored or moving between them.",
     "Fine charcoal linework and flat charcoal fills on a warm neutral off-white background, monochrome and calm.",
-    "Landscape 16:9 with one focal point near the centre and generous negative space around it.",
+    "Landscape 16:9 at 1536x1024 pixels with one focal point near the centre and generous negative space around it.",
     "No text, letters, numbers, captions, logos, watermarks, faces, gradients, glow, neon, or 3D rendering.",
   ].join(" ");
 }

@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { runBlogGeneration } from "@/app/lib/ai/generate-blog";
+import { sweepOrphanedBlobs } from "@/app/lib/blob";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -31,13 +32,14 @@ export async function GET(request: NextRequest) {
 
   try {
     const result = await runBlogGeneration({ force });
+    const swept = await sweepOrphanedBlobs();
 
     if (result.status === "skipped" && result.reason === "already_running") {
       return NextResponse.json(result, { status: 409 });
     }
 
     return NextResponse.json(
-      { ...result, ...(force && { forced: true }) },
+      { ...result, ...(force && { forced: true }), sweptBlobs: swept },
       { status: result.status === "failed" ? 500 : 200 },
     );
   } catch (error) {
