@@ -30,11 +30,11 @@
     "@tiptap/extension-typography": "^3.31.3",
     "@tiptap/react": "^3.19.0",
     "@tiptap/starter-kit": "^3.19.0",
-    "@vercel/blob": "^2.0.0",
+    "@vercel/blob": "^2.8.2",
     "bcryptjs": "^3.0.3",
     "clsx": "^2.1.1",
     "lowlight": "^3.3.0",
-    "next": "^16.4.0",
+    "next": "^16.4.3",
     "next-auth": "^5.0.0-beta.30",
     "next-themes": "^0.4.6",
     "prisma": "^5.22.0",
@@ -43,10 +43,10 @@
     "react-markdown": "^10.1.0",
     "rehype-raw": "^7.0.0",
     "remark-gfm": "^4.0.1",
-    "sanitize-html": "^2.17.7",
+    "sanitize-html": "^2.18.1",
     "tailwind-merge": "^3.4.0",
     "use-debounce": "^10.0.6",
-    "zod": "^4.1.12"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -55,9 +55,14 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/sanitize-html": "^2.16.1",
-    "eslint": "^9",
-    "eslint-config-next": "^16.4.0",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^16.4.3",
     "tailwindcss": "^4",
     "typescript": "5.9.3"
+  },
+  "overrides": {
+    "@vercel/cli-config": {
+      "zod": "4.6.7"
+    }
   }
 }

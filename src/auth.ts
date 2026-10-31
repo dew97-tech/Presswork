@@ -1,4 +1,10 @@
 import prisma from "@/app/lib/prisma";
+import {
+  clearLoginFailures,
+  loginAttemptKey,
+  loginBlockedUntil,
+  registerLoginFailure,
+} from "@/app/lib/login-guard";
 import bcrypt from "bcryptjs";
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
@@ -56,18 +62,39 @@ export const { auth, signIn, signOut, handlers: { GET, POST } } = NextAuth({
         }
 
         const { email, password } = parsedCredentials.data;
+        const key = await loginAttemptKey(email);
+
+        if (await loginBlockedUntil(key)) {
+          return null;
+        }
 
         const userCount = await prisma.user.count();
 
         if (userCount === 0) {
-          return bootstrapAdmin(email, password);
+          const admin = await bootstrapAdmin(email, password);
+          if (!admin) {
+            await registerLoginFailure(key);
+            return null;
+          }
+
+          await clearLoginFailures(key);
+          return admin;
         }
 
         const user = await getUser(email);
-        if (!user?.password) return null;
+        if (!user?.password) {
+          await registerLoginFailure(key);
+          return null;
+        }
 
         const passwordsMatch = await bcrypt.compare(password, user.password);
-        return passwordsMatch ? user : null;
+        if (!passwordsMatch) {
+          await registerLoginFailure(key);
+          return null;
+        }
+
+        await clearLoginFailures(key);
+        return user;
       },
     }),
   ],
