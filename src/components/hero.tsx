@@ -18,24 +18,12 @@ export function Hero() {
           {personal.name}
         </h1>
 
-        <p data-seq="2" className="mt-6 max-w-[54ch] text-ink-muted md:text-lg">
-          I build{" "}
-          <span className="highlight-marker hero-marker">
-            AI-driven SaaS
-          </span>{" "}
-          backends with{" "}
-          <span className="highlight-marker hero-marker-late">
-            Laravel and AWS
-          </span>
-          , then write about the engineering decisions behind them.
-        </p>
-
-        <p data-seq="3" className="eyebrow mt-4 text-ink-faint">
+        <p data-seq="2" className="eyebrow mt-6 text-ink-faint">
           <TypeLine text={`${personal.role} at ${personal.company}`} />
         </p>
 
         <div
-          data-seq="4"
+          data-seq="3"
           className="mt-9 flex flex-wrap items-center gap-x-7 gap-y-4"
         >
           <Link

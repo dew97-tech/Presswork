@@ -99,7 +99,7 @@ Rules do the work: 1px `--rule` for separation, 2px `--rule-strong` for emphasis
 - Topic hubs under `/blog/tag` reuse the blog ledger; hubs below three posts stay `noindex` and out of the sitemap.
 - Registration crosshair: a 9px `+` in charcoal, centred on the section rule at the container's left edge. Hidden below `md`.
 - Project rows are an asymmetric ledger: title and meta left, detail right at `lg`. No three equal cards.
-- Hero carries at most four text elements: name, statement, role line, actions. No scroll cue, badge, availability dot, or facts strip.
+- Hero carries three text elements: name, role line, actions. No scroll cue, badge, availability dot, or facts strip.
 
 ---
 
@@ -107,7 +107,7 @@ Rules do the work: 1px `--rule` for separation, 2px `--rule-strong` for emphasis
 
 Typed line appears in three places only: the hero role line (mount, with caret), section headings (on view, 28ms per character, no caret), and the Experience total (450ms delay, with caret).
 
-Marker placements: hero phrases, `4+ years`, one outcome per project row, and `mark` in articles. Never highlight a technology name just because it is listed elsewhere.
+Marker placements: `4+ years`, one outcome per project row, and `mark` in articles. Never highlight a technology name just because it is listed elsewhere.
 
 Reveals use one pattern: opacity plus 8px rise, 500ms, `cubic-bezier(0.23, 1, 0.32, 1)`, once. Only `transform` and `opacity` animate.
 

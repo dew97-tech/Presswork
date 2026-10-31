@@ -19,7 +19,7 @@ export const metadata: Metadata = {
         url: "/og.png",
         width: 1200,
         height: 630,
-        alt: "David Dew Mallick, Software Engineer",
+        alt: "David Dew Mallick, Intermediate Software Engineer",
       },
     ],
   },

@@ -150,9 +150,6 @@ export default async function BlogTagPage({
         >
           {displayTag(summary.tag)}
         </h1>
-        <p className="mt-4 text-ink-muted">
-          Articles about {displayTag(summary.tag)} on this blog.
-        </p>
       </header>
 
       {posts.length === 0 ? (

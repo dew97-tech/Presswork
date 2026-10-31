@@ -8,9 +8,9 @@ import "./globals.css";
 const siteUrl = getSiteUrl();
 const { personal } = resumeData;
 
-const siteTitle = "David Dew Mallick | Software Engineer";
+const siteTitle = "David Dew Mallick | Intermediate Software Engineer";
 const siteDescription =
-  "Software engineer in Dhaka, Bangladesh building AI-driven SaaS infrastructure, cloud pipelines, and data-heavy features with Laravel and AWS.";
+  "Portfolio and technical blog of David Dew Mallick, an intermediate software engineer in Dhaka, Bangladesh.";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -94,7 +94,7 @@ export const metadata: Metadata = {
   },
   description: siteDescription,
   keywords: [
-    "Software Engineer",
+    "Intermediate Software Engineer",
     "Next.js",
     "React",
     "PHP",
@@ -135,7 +135,7 @@ export const metadata: Metadata = {
         url: "/og.png",
         width: 1200,
         height: 630,
-        alt: "David Dew Mallick, Software Engineer",
+        alt: "David Dew Mallick, Intermediate Software Engineer",
       },
     ],
   },

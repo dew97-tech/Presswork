@@ -31,15 +31,13 @@ export type Job = {
 export const resumeData = {
   personal: {
     name: "David Dew Mallick",
-    role: "Software Engineer",
+    role: "Intermediate Software Engineer",
     company: "JB Connect Ltd.",
     email: "david.dew.mallick@g.bracu.ac.bd",
     phone: "+880-1836475822",
     github: "https://github.com/dew97-tech",
     linkedin: "https://www.linkedin.com/in/david-dew-mallick/",
     location: "Dhaka, Bangladesh",
-    tagline:
-      "Software engineer building AI-driven SaaS infrastructure, cloud pipelines, and data-heavy features with Laravel and AWS.",
   },
   education: [
     {
@@ -68,7 +66,7 @@ export const resumeData = {
     {
       company: "JB Connect Ltd.",
       location: "Banani, Dhaka, Bangladesh",
-      role: "Software Engineer",
+      role: "Intermediate Software Engineer",
       date: "Oct 2024 - Present",
       promotions: [],
       projects: [

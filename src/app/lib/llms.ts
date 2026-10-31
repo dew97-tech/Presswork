@@ -39,7 +39,7 @@ export async function buildLlmsTxt(): Promise<string> {
   const lines = [
     `# ${personal.name}`,
     "",
-    `> ${personal.tagline} Based in ${personal.location}.`,
+    `> ${personal.role} at ${personal.company}. Based in ${personal.location}.`,
     "",
     `This site is a personal engineering portfolio. Content may be read, quoted, and cited with attribution to ${personal.name} and a link to the source URL. AI crawlers are welcome; see ${siteUrl}/robots.txt.`,
     "",

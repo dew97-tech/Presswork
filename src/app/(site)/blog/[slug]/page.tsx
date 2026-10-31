@@ -318,11 +318,6 @@ export default async function BlogPostPage({
                 <div className="min-w-0">
                   <h2 className="font-medium text-ink-brown">{personal.name}</h2>
                   <p className="mt-0.5 text-sm text-ink-muted">{personal.role}</p>
-                  <p className="mt-3 max-w-[62ch] text-base leading-relaxed text-ink-muted">
-                    I build AI-driven SaaS infrastructure and backend systems with
-                    Laravel, AWS, and SQL, and write about the engineering decisions
-                    behind them.
-                  </p>
                   <p className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-sm">
                     <a
                       href={personal.github}

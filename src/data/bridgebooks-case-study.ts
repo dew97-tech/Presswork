@@ -6,7 +6,7 @@ export const bridgeBooksCaseStudy = {
   summary:
     "An AI-driven SEO platform for article generation, backlink acquisition, and contact automation.",
   company: "JB Connect Ltd.",
-  role: "Software Engineer",
+  role: "Intermediate Software Engineer",
   date: "Oct 2024 - Present",
   collaboration:
     "Built the AI article generation module from scratch with two teammates over eight weeks.",

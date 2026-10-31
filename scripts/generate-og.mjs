@@ -5,12 +5,12 @@ import { createElement as h } from "react";
 const require = createRequire(import.meta.url);
 const { ImageResponse } = require("next/dist/compiled/@vercel/og/index.node.js");
 
-const PAPER = "#F4F4F1";
-const INK = "#1A1B18";
-const INK_MUTED = "#4F514A";
-const INK_FAINT = "#63655E";
-const RULE = "#E2E2DC";
-const YELLOW = "#FFD300";
+const PAPER = "#F4F4F5";
+const INK = "#18181B";
+const INK_MUTED = "#52525B";
+const INK_FAINT = "#71717A";
+const RULE = "#E4E4E7";
+const ACCENT = "#232323";
 
 const FONTS = [
   {
@@ -64,7 +64,7 @@ const image = new ImageResponse(
     h(
       "div",
       { style: { fontFamily: "Geist Mono", fontSize: 24, color: INK_FAINT } },
-      "david-dew-mallick.vercel.app",
+      "davidmallick.dev",
     ),
     h(
       "div",
@@ -85,7 +85,7 @@ const image = new ImageResponse(
       h(
         "div",
         { style: { marginTop: 26, fontSize: 30, color: INK_MUTED } },
-        "Software Engineer at JB Connect Ltd.",
+        "Intermediate Software Engineer at JB Connect Ltd.",
       ),
     ),
     h(
@@ -104,7 +104,7 @@ const image = new ImageResponse(
         { style: { fontFamily: "Geist Mono", fontSize: 22, color: INK_FAINT } },
         "Dhaka, Bangladesh",
       ),
-      h("div", { style: { width: 44, height: 8, backgroundColor: YELLOW } }),
+      h("div", { style: { width: 44, height: 8, backgroundColor: ACCENT } }),
     ),
   ),
   { width: 1200, height: 630, fonts: loadedFonts },
