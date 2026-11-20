@@ -15,6 +15,7 @@ import {
 import { revalidatePostSurfaces } from "@/app/lib/post-revalidate";
 import { markKeywordsUsedForPost } from "@/app/lib/keyword-usage";
 import prisma from "@/app/lib/prisma";
+import { AI_PAUSED_MESSAGE, isAiConfigured } from "@/app/lib/ai/availability";
 import { auth } from "@/auth";
 import { revalidatePath } from "next/cache";
 
@@ -45,6 +46,10 @@ export async function reviewArticle(
 
   if (!postId) {
     return { ok: false, error: "Missing post id." };
+  }
+
+  if (!isAiConfigured()) {
+    return { ok: false, error: AI_PAUSED_MESSAGE };
   }
 
   try {

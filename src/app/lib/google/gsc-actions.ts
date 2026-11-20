@@ -1,6 +1,7 @@
 "use server";
 
 import { auth } from "@/auth";
+import { AI_PAUSED_MESSAGE, isAiConfigured } from "@/app/lib/ai/availability";
 import { runSearchAnalysis, type AnalysisBody } from "@/app/lib/google/analysis";
 import { GscAuthError, GscNotConnectedError } from "@/app/lib/google/errors";
 import { inspectUrl, isGscConnected } from "@/app/lib/google/search-console";
@@ -161,6 +162,10 @@ export async function analyzeSearchPerformance(range: {
 
   if (!(await isGscConnected())) {
     return { ok: false, error: "Connect a Google account in settings first." };
+  }
+
+  if (!isAiConfigured()) {
+    return { ok: false, error: AI_PAUSED_MESSAGE };
   }
 
   if (

@@ -1,3 +1,4 @@
+import { isAiConfigured } from "@/app/lib/ai/availability";
 import prisma from "@/app/lib/prisma";
 import { getKeywordPlannerSettings } from "@/app/lib/settings";
 import KeywordsManager, {
@@ -143,6 +144,7 @@ export default async function KeywordsPage() {
       <KeywordsManager
         initialKeywords={initialKeywords}
         plannerConfigured={plannerConfigured}
+        aiConfigured={isAiConfigured()}
       />
     </div>
   );

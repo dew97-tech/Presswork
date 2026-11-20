@@ -10,6 +10,7 @@ import {
 import { fetchSearchQueries } from "@/app/lib/google/search-console";
 import prisma from "@/app/lib/prisma";
 import { getGenerationSettings } from "@/app/lib/settings";
+import { AI_PAUSED_MESSAGE, isAiConfigured } from "./availability";
 import { buildGenerationContext } from "./blog-prompt";
 import { callModel } from "./call-model";
 import { MAX_AUTO_DRAFTS } from "./constants";
@@ -92,7 +93,7 @@ interface ValidatedDraft {
 export type GenerationResult =
   | {
       status: "skipped";
-      reason: "draft_cap" | "already_running";
+      reason: "draft_cap" | "already_running" | "ai_disabled";
       detail: string;
       drafts?: number;
     }
@@ -439,6 +440,10 @@ export async function runBlogGeneration(
 ): Promise<GenerationResult> {
   const startedAt = Date.now();
   const sessionId = `portfolio-blog-${new Date().toISOString()}`;
+
+  if (!isAiConfigured()) {
+    return { status: "skipped", reason: "ai_disabled", detail: AI_PAUSED_MESSAGE };
+  }
 
   const lockWindowStart = new Date(
     Date.now() - RUNNING_LOCK_MINUTES * 60 * 1000,

@@ -65,6 +65,7 @@ export default function ArticleReviewPanel({
   initialHistory,
   reviewModelLabel,
   webSearchConfigured,
+  aiConfigured,
   initialFocus = null,
   initialReview = null,
   autoStart = false,
@@ -75,6 +76,7 @@ export default function ArticleReviewPanel({
   initialHistory: ReviewHistoryItem[];
   reviewModelLabel: string;
   webSearchConfigured: boolean;
+  aiConfigured: boolean;
   initialFocus?: ReviewFocus | null;
   initialReview?: ReviewResult | null;
   autoStart?: boolean;
@@ -172,7 +174,7 @@ export default function ArticleReviewPanel({
   const autoStarted = useRef(false);
 
   useEffect(() => {
-    if (!autoStart || !initialFocus || autoStarted.current) {
+    if (!autoStart || !aiConfigured || !initialFocus || autoStarted.current) {
       return;
     }
 
@@ -181,7 +183,7 @@ export default function ArticleReviewPanel({
     handleReview(initialFocus);
     // The review should start exactly once for the deep link.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoStart, initialFocus, postId]);
+  }, [autoStart, aiConfigured, initialFocus, postId]);
 
   const handleApply = () => {
     if (!active) {
@@ -310,7 +312,8 @@ export default function ArticleReviewPanel({
         <button
           type="button"
           onClick={() => handleReview()}
-          disabled={isReviewing || isApplying}
+          disabled={isReviewing || isApplying || !aiConfigured}
+          title={aiConfigured ? undefined : "AI is paused: no model API key is configured"}
           className="inline-flex h-11 items-center gap-1.5 rounded bg-primary px-4 text-sm font-medium text-primary-foreground transition-[background-color,transform] hover:bg-[var(--clay-deep-hover)] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isReviewing ? (

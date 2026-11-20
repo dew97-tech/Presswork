@@ -62,11 +62,13 @@ export default function SearchAnalysisPanel({
   range,
   publishedPosts,
   feedbackReviews,
+  aiConfigured,
 }: {
   initial: LastAnalysis | null;
   range: { preset: string; startDate: string; endDate: string };
   publishedPosts: PublishedPost[];
   feedbackReviews: FeedbackReviewMap;
+  aiConfigured: boolean;
 }) {
   const { toast } = useToast();
   const router = useRouter();
@@ -222,7 +224,8 @@ export default function SearchAnalysisPanel({
         <button
           type="button"
           onClick={handleRun}
-          disabled={isRunning}
+          disabled={isRunning || !aiConfigured}
+          title={aiConfigured ? undefined : "AI is paused: no model API key is configured"}
           className="inline-flex h-11 items-center gap-1.5 rounded bg-primary px-4 text-sm font-medium text-primary-foreground transition-[background-color,transform] hover:bg-[var(--clay-deep-hover)] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isRunning ? (

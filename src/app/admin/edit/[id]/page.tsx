@@ -12,6 +12,7 @@ import {
 } from "@/app/lib/google/feedback";
 import { getLastAnalysis, getReviewSettings } from "@/app/lib/settings";
 import { isWebSearchConfigured } from "@/app/lib/web-search";
+import { isAiConfigured } from "@/app/lib/ai/availability";
 import PostEditorTabs from "@/app/ui/post-editor-tabs";
 import { notFound } from "next/navigation";
 
@@ -100,6 +101,7 @@ export default async function EditPostPage({
       initialHistory={reviews}
       reviewModelLabel={reviewModelLabel}
       webSearchConfigured={isWebSearchConfigured()}
+      aiConfigured={isAiConfigured()}
       initialTab={initialTab}
       initialFocus={initialFocus}
       initialReview={initialReview}

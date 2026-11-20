@@ -100,9 +100,11 @@ function formatBidRange(low: number | null, high: number | null): string {
 export default function KeywordsManager({
   initialKeywords,
   plannerConfigured,
+  aiConfigured,
 }: {
   initialKeywords: KeywordItem[];
   plannerConfigured: boolean;
+  aiConfigured: boolean;
 }) {
   const { toast } = useToast();
   const router = useRouter();
@@ -918,11 +920,13 @@ export default function KeywordsManager({
                                     <button
                                       type="button"
                                       onClick={() => setConfirmId(row.id)}
-                                      disabled={generatingId !== null}
+                                      disabled={generatingId !== null || !aiConfigured}
                                       title={
-                                        generatingId !== null
-                                          ? "A draft is already being generated"
-                                          : undefined
+                                        !aiConfigured
+                                          ? "AI is paused: no model API key is configured"
+                                          : generatingId !== null
+                                            ? "A draft is already being generated"
+                                            : undefined
                                       }
                                       className={smallPrimaryButtonClassName}
                                     >
