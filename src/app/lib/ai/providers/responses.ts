@@ -44,6 +44,7 @@ export const responsesProvider: Provider = async ({
   maxTokens = 6000,
   reasoningEffort,
   timeoutMs = DEFAULT_TIMEOUT_MS,
+  signal,
   jsonMode = true,
 }): Promise<ModelCallResult> => {
   const system = messages
@@ -70,6 +71,7 @@ export const responsesProvider: Provider = async ({
       path: "/responses",
       sessionId,
       timeoutMs,
+      signal,
       body,
     });
 

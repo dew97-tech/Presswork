@@ -14,6 +14,8 @@ export interface ModelCallParams {
   reasoningEffort?: ReasoningEffort;
   timeoutMs?: number;
   jsonMode?: boolean;
+  /** Aborts every request of this call, including provider retries. */
+  signal?: AbortSignal;
 }
 
 export interface ModelCallResult {

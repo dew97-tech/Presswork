@@ -10,14 +10,16 @@ import {
 import { buildAuthorProfile } from "./blog-prompt";
 import { callModel } from "./call-model";
 import {
-  BANNED_PHRASES,
-  clampDescription,
+  ARTICLE_LIMITS,
   countWords,
+  EM_DASH,
+  EN_DASH,
+  internalBlogSlugs,
   normalizeDashes,
-  sanitizeGeneratedHtml,
-  slugify,
+  sanitizeArticleHtml,
   stripHtml,
-} from "./generate-blog";
+} from "@/app/lib/article-content";
+import { BANNED_PHRASES, clampDescription, slugify } from "./generate-blog";
 import { extractJsonObject } from "./opencode-go";
 import {
   findTemplateVariables,
@@ -246,8 +248,6 @@ const EXTERNAL_DOC_DOMAINS = [
   "docker.com",
 ];
 
-const EM_DASH = String.fromCharCode(0x2014);
-const EN_DASH = String.fromCharCode(0x2013);
 const DASH_PATTERN = new RegExp(`[${EM_DASH}${EN_DASH}]`, "g");
 
 export function runDeterministicChecks(
@@ -264,10 +264,7 @@ export function runDeterministicChecks(
     findings.push({ ...finding, verifiedBy: "code" });
   };
 
-  const blogLinks = Array.from(
-    post.content.matchAll(/href="\/blog\/([a-z0-9-]+)"/g),
-    (match) => match[1],
-  );
+  const blogLinks = internalBlogSlugs(post.content);
   const missingLinks = Array.from(
     new Set(blogLinks.filter((slug) => !publishedSlugs.has(slug))),
   );
@@ -282,18 +279,24 @@ export function runDeterministicChecks(
   }
 
   const titleLength = post.title.length;
-  if (titleLength < 25 || titleLength > 70) {
+  if (
+    titleLength < ARTICLE_LIMITS.minTitleLength ||
+    titleLength > ARTICLE_LIMITS.maxTitleLength
+  ) {
     add({
       severity: "error",
       category: "seo",
       title: "Title length is outside the allowed bounds",
-      detail: `The title is ${titleLength} characters; the page requires 25 to 70.`,
+      detail: `The title is ${titleLength} characters; the page requires ${ARTICLE_LIMITS.minTitleLength} to ${ARTICLE_LIMITS.maxTitleLength}.`,
       fix: "Rewrite the title to 35 to 50 characters.",
     });
   }
 
   const descriptionLength = post.description.length;
-  if (descriptionLength < 70 || descriptionLength > 190) {
+  if (
+    descriptionLength < ARTICLE_LIMITS.minDescriptionLength ||
+    descriptionLength > ARTICLE_LIMITS.maxDescriptionLength
+  ) {
     add({
       severity: "error",
       category: "seo",
@@ -412,12 +415,12 @@ export function runDeterministicChecks(
   }
 
   const words = countWords(post.content);
-  if (words < 900 || words > 2600) {
+  if (words < ARTICLE_LIMITS.minWordCount || words > ARTICLE_LIMITS.maxWordCount) {
     add({
       severity: "warning",
       category: "structure",
       title: "Article length is outside the target band",
-      detail: `The article is ${words} words; the target is 900 to 2600.`,
+      detail: `The article is ${words} words; the target is ${ARTICLE_LIMITS.minWordCount} to ${ARTICLE_LIMITS.maxWordCount}.`,
       fix: "Trim padding or expand thin sections.",
     });
   }
@@ -468,7 +471,10 @@ function postProcessSuggested(
 
   if (suggested.title) {
     const title = normalizeDashes(suggested.title.trim());
-    if (title.length >= 25 && title.length <= 70) {
+    if (
+      title.length >= ARTICLE_LIMITS.minTitleLength &&
+      title.length <= ARTICLE_LIMITS.maxTitleLength
+    ) {
       result.title = title;
     } else {
       findings.push({
@@ -476,7 +482,7 @@ function postProcessSuggested(
         category: "seo",
         title: "Suggested title discarded",
         verifiedBy: "code",
-        detail: `The rewritten title was ${title.length} characters; the page requires 25 to 70 before the site suffix.`,
+        detail: `The rewritten title was ${title.length} characters; the page requires ${ARTICLE_LIMITS.minTitleLength} to ${ARTICLE_LIMITS.maxTitleLength} before the site suffix.`,
         fix: "Adjust the title manually or rerun the review.",
       });
     }
@@ -489,12 +495,11 @@ function postProcessSuggested(
   }
 
   if (suggested.content) {
-    const html = sanitizeGeneratedHtml(normalizeDashes(suggested.content));
+    const html = sanitizeArticleHtml(normalizeDashes(suggested.content));
     const words = countWords(html);
-    const invalidLink = Array.from(
-      html.matchAll(/href="\/blog\/([a-z0-9-]+)"/g),
-      (match) => match[1],
-    ).find((slug) => !publishedSlugs.has(slug));
+    const invalidLink = internalBlogSlugs(html).find(
+      (slug) => !publishedSlugs.has(slug),
+    );
 
     if (words < 300) {
       findings.push({
@@ -556,6 +561,9 @@ export async function runArticleReview(
   if (!post) {
     throw new Error("Post not found.");
   }
+  // The review describes the article as read here. Persisting this as the
+  // review's createdAt lets applyReview detect edits made during or after it.
+  const reviewedAt = new Date();
 
   const parsedFocus =
     focusInput === undefined || focusInput === null
@@ -650,6 +658,8 @@ Address this feedback first, verify it against the article and search evidence, 
       maxTokens: 8000,
       reasoningEffort: settings.reasoningEffort,
       timeoutMs: 180_000,
+      // Stay inside the 300s maxDuration of the page invoking this action.
+      deadline: reviewedAt.getTime() + 270_000,
     });
   } catch (error) {
     const message = await persistFailure(
@@ -723,6 +733,7 @@ Address this feedback first, verify it against the article and search evidence, 
   const review = await prisma.articleReview.create({
     data: {
       postId,
+      createdAt: reviewedAt,
       model: settings.modelId,
       status: "completed",
       usedWebSearch: searchResults.length > 0,

@@ -6,6 +6,9 @@ export function revalidatePostSurfaces(...slugs: string[]) {
   revalidatePath("/admin");
   revalidatePath("/sitemap.xml");
   revalidatePath("/feed.xml");
+  // Both list published posts via buildLlmsTxt().
+  revalidatePath("/llms.txt");
+  revalidatePath("/ai.txt");
 
   for (const slug of slugs) {
     if (slug) revalidatePath(`/blog/${slug}`);

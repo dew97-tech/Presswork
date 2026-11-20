@@ -43,6 +43,7 @@ export const chatProvider: Provider = async ({
   maxTokens = 6000,
   reasoningEffort,
   timeoutMs = DEFAULT_TIMEOUT_MS,
+  signal,
   jsonMode = true,
 }): Promise<ModelCallResult> => {
   let currentEffort = reasoningEffort;
@@ -72,6 +73,7 @@ export const chatProvider: Provider = async ({
       path: "/chat/completions",
       sessionId,
       timeoutMs,
+      signal,
       body,
     });
 

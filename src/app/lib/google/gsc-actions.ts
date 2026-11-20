@@ -45,7 +45,7 @@ export async function syncIndexStatus(): Promise<SyncIndexResult> {
   const posts = await prisma.post.findMany({
     where: { published: true },
     orderBy: { publishedAt: "desc" },
-    select: { id: true, slug: true },
+    select: { id: true, slug: true, updatedAt: true },
   });
 
   let indexed = 0;
@@ -74,6 +74,9 @@ export async function syncIndexStatus(): Promise<SyncIndexResult> {
             ...(result.lastCrawlTime
               ? { indexedAt: new Date(result.lastCrawlTime) }
               : {}),
+            // Index bookkeeping is not an edit: keep updatedAt, which drives
+            // the public "Updated" date, dateModified and sitemap lastmod.
+            updatedAt: post.updatedAt,
           },
         });
 

@@ -43,7 +43,9 @@ export async function deleteBlobIfUnused(
   }
 }
 
-export async function sweepOrphanedBlobs(): Promise<number> {
+export async function sweepOrphanedBlobs(
+  options: { deadline?: number } = {},
+): Promise<number> {
   if (!getStoreHostname()) return 0;
 
   try {
@@ -53,6 +55,7 @@ export async function sweepOrphanedBlobs(): Promise<number> {
 
     for (const blob of blobs) {
       if (deleted >= SWEEP_MAX_DELETIONS) break;
+      if (options.deadline !== undefined && Date.now() > options.deadline) break;
       if (blob.uploadedAt.getTime() > cutoff) continue;
 
       const referenced = await prisma.post.count({

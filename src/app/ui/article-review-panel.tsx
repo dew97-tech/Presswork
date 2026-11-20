@@ -234,7 +234,15 @@ export default function ArticleReviewPanel({
     }
 
     startApply(async () => {
-      await discardReview(active.reviewId);
+      const result = await discardReview(active.reviewId);
+      if (!result.ok) {
+        toast({
+          variant: "error",
+          label: "Discard failed",
+          title: "This review was already applied or no longer exists.",
+        });
+        return;
+      }
       updateHistory((prev) =>
         prev.map((item) =>
           item.id === active.reviewId ? { ...item, status: "discarded" } : item,

@@ -1,5 +1,12 @@
-import sanitizeHtml from "sanitize-html";
 import { z } from "zod";
+import {
+  ARTICLE_LIMITS,
+  countWords,
+  internalBlogSlugs,
+  normalizeDashes,
+  sanitizeArticleHtml,
+  stripHtml,
+} from "@/app/lib/article-content";
 import { fetchSearchQueries } from "@/app/lib/google/search-console";
 import prisma from "@/app/lib/prisma";
 import { getGenerationSettings } from "@/app/lib/settings";
@@ -22,20 +29,22 @@ import {
 import { CURATED_TOPICS, fetchTrends, isBannedTopic, type TrendItem } from "./trends";
 
 const RUNNING_LOCK_MINUTES = 15;
+// Arbitrary constant key for pg_advisory_xact_lock; serializes run claims.
+const GENERATION_CLAIM_LOCK_KEY = 724_631_001;
 
 const MAX_TOTAL_GENERATION_MS = 260_000;
 const GENERATION_REQUEST_TIMEOUT_MS = 120_000;
 const GENERATION_MAX_TOKENS = 6000;
-const MIN_WORD_COUNT = 900;
-const MAX_WORD_COUNT = 2_600;
+const MIN_WORD_COUNT = ARTICLE_LIMITS.minWordCount;
+const MAX_WORD_COUNT = ARTICLE_LIMITS.maxWordCount;
 const MAX_TITLE_SIMILARITY = 0.6;
-const MIN_TITLE_LENGTH = 25;
-const MAX_TITLE_LENGTH = 70;
-const MIN_DESCRIPTION_LENGTH = 70;
-const MAX_DESCRIPTION_LENGTH = 190;
+const MIN_TITLE_LENGTH = ARTICLE_LIMITS.minTitleLength;
+const MAX_TITLE_LENGTH = ARTICLE_LIMITS.maxTitleLength;
+const MIN_DESCRIPTION_LENGTH = ARTICLE_LIMITS.minDescriptionLength;
+const MAX_DESCRIPTION_LENGTH = ARTICLE_LIMITS.maxDescriptionLength;
 const REQUIRED_SECONDARY_KEYWORDS = 4;
-const MAX_TAG_WORDS = 3;
-const MAX_TAGS = 4;
+const MAX_TAG_WORDS = ARTICLE_LIMITS.maxTagWords;
+const MAX_TAGS = ARTICLE_LIMITS.maxTags;
 
 export const BANNED_PHRASES = [
   "in today's fast-paced",
@@ -62,7 +71,7 @@ const DraftSchema = z.object({
   description: z.string().min(30).max(300),
   topic: z.string().min(3).max(240),
   primaryKeyword: z.string().min(2).max(100),
-  secondaryKeywords: z.array(z.string()).min(1).max(8),
+  secondaryKeywords: z.array(z.string().max(100)).min(1).max(8),
   readTime: z.string().max(40).optional(),
   tags: z.array(z.string()).min(1).max(8).optional(),
   html: z.string().min(500),
@@ -145,19 +154,6 @@ const STOP_WORDS = new Set([
   "ultimate",
 ]);
 
-export function stripHtml(html: string): string {
-  return html
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&[a-z#0-9]+;/gi, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-export function countWords(html: string): number {
-  const text = stripHtml(html);
-  return text ? text.split(" ").length : 0;
-}
-
 export function slugify(value: string): string {
   return value
     .toLowerCase()
@@ -189,74 +185,6 @@ function titleSimilarity(a: string, b: string): number {
   return intersection / (tokensA.size + tokensB.size - intersection);
 }
 
-const EM_DASH = String.fromCharCode(0x2014);
-const EN_DASH = String.fromCharCode(0x2013);
-
-export function normalizeDashes(text: string): string {
-  return text
-    .replaceAll(` ${EM_DASH} `, ", ")
-    .replaceAll(` ${EN_DASH} `, ", ")
-    .replaceAll(EM_DASH, "-")
-    .replaceAll(EN_DASH, "-");
-}
-
-export function sanitizeGeneratedHtml(html: string): string {
-  const clean = sanitizeHtml(html, {
-    allowedTags: [
-      "h2",
-      "h3",
-      "h4",
-      "p",
-      "a",
-      "ul",
-      "ol",
-      "li",
-      "strong",
-      "em",
-      "b",
-      "i",
-      "u",
-      "code",
-      "pre",
-      "blockquote",
-      "table",
-      "thead",
-      "tbody",
-      "tr",
-      "th",
-      "td",
-      "hr",
-      "br",
-      "div",
-      "span",
-      "mark",
-      "section",
-      "article",
-      "col",
-      "colgroup",
-    ],
-    allowedAttributes: {
-      a: ["href", "title", "target", "rel"],
-      th: ["colspan", "rowspan", "scope"],
-      td: ["colspan", "rowspan"],
-      col: ["span"],
-      colgroup: ["span"],
-      div: ["class"],
-      pre: ["class"],
-      table: ["class"],
-    },
-    allowedClasses: {
-      div: ["highlight-box", "pro-tip", "table-wrapper"],
-      pre: ["code-snippet"],
-      table: ["comparison-table"],
-    },
-    allowedSchemes: ["http", "https", "mailto"],
-    disallowedTagsMode: "discard",
-  });
-
-  return normalizeDashes(clean);
-}
-
 export function clampDescription(value: string, max = 158): string {
   const text = value.trim();
   if (text.length <= max) return text;
@@ -285,7 +213,7 @@ function validateDraft(
   const normalizedTitle = normalizeDashes(parsed.title);
   const normalizedDescription = normalizeDashes(parsed.description);
   const normalizedTopic = normalizeDashes(parsed.topic);
-  const html = sanitizeGeneratedHtml(parsed.html);
+  const html = sanitizeArticleHtml(parsed.html);
   const wordCount = countWords(html);
 
   if (wordCount < MIN_WORD_COUNT) {
@@ -373,14 +301,12 @@ function validateDraft(
       (parsed.tags?.length ? parsed.tags : secondaryKeywords)
         .map((tag) => tag.trim().toLowerCase().replace(/\s+/g, " "))
         .filter(Boolean)
-        .map((tag) => tag.split(" ").slice(0, MAX_TAG_WORDS).join(" ")),
+        .map((tag) => tag.split(" ").slice(0, MAX_TAG_WORDS).join(" "))
+        .filter((tag) => tag.length <= ARTICLE_LIMITS.maxTagLength),
     ),
   ).slice(0, MAX_TAGS);
 
-  const linkTargets = Array.from(
-    html.matchAll(/href="\/blog\/([a-z0-9-]+)"/g),
-    (match) => match[1],
-  );
+  const linkTargets = internalBlogSlugs(html);
   const unpublishedLink = linkTargets.find((slug) => !publishedSlugs.has(slug));
   if (unpublishedLink) {
     throw new Error(
@@ -475,6 +401,7 @@ async function generateForModel(
       maxTokens: GENERATION_MAX_TOKENS,
       reasoningEffort: "none",
       timeoutMs: GENERATION_REQUEST_TIMEOUT_MS,
+      deadline,
     });
 
     try {
@@ -513,21 +440,20 @@ export async function runBlogGeneration(
   const startedAt = Date.now();
   const sessionId = `portfolio-blog-${new Date().toISOString()}`;
 
-  const activeRun = await prisma.generationRun.findFirst({
-    where: {
-      status: "running",
-      startedAt: { gte: new Date(Date.now() - RUNNING_LOCK_MINUTES * 60 * 1000) },
-    },
-    select: { startedAt: true },
-  });
+  const lockWindowStart = new Date(
+    Date.now() - RUNNING_LOCK_MINUTES * 60 * 1000,
+  );
 
-  if (activeRun) {
-    return {
-      status: "skipped",
-      reason: "already_running",
-      detail: `Another generation run started at ${activeRun.startedAt.toISOString()}; lock window is ${RUNNING_LOCK_MINUTES} minutes`,
-    };
-  }
+  // A run killed by the platform timeout never reaches its catch block, so
+  // close out any "running" row older than the lock window.
+  await prisma.generationRun.updateMany({
+    where: { status: "running", startedAt: { lt: lockWindowStart } },
+    data: {
+      status: "failed",
+      finishedAt: new Date(),
+      error: `Run did not finish within ${RUNNING_LOCK_MINUTES} minutes (likely killed by the function timeout)`,
+    },
+  });
 
   let forcedKeyword: string | null = null;
   if (options.keywordId) {
@@ -544,29 +470,61 @@ export async function runBlogGeneration(
     forcedKeyword = keywordRow.keyword;
   }
 
-  const draftCount = await prisma.post.count({
-    where: { published: false, source: "ai" },
+  // Check-and-claim under a transaction-scoped advisory lock so concurrent
+  // triggers (cron, admin button, keyword page) cannot both start a run.
+  // Transaction-scoped locks work through the pgbouncer transaction pooler.
+  const claim = await prisma.$transaction(async (tx) => {
+    // Fixed integer key, no user input; SELECT 1 avoids Prisma's void decoding.
+    await tx.$queryRawUnsafe(
+      `SELECT 1 AS locked FROM pg_advisory_xact_lock(${GENERATION_CLAIM_LOCK_KEY})`,
+    );
+
+    const activeRun = await tx.generationRun.findFirst({
+      where: { status: "running", startedAt: { gte: lockWindowStart } },
+      select: { startedAt: true },
+    });
+    if (activeRun) {
+      return { kind: "running" as const, startedAt: activeRun.startedAt };
+    }
+
+    const draftCount = await tx.post.count({
+      where: { published: false, source: "ai" },
+    });
+    if (!options.force && draftCount >= MAX_AUTO_DRAFTS) {
+      await tx.generationRun.create({
+        data: {
+          status: "skipped_cap",
+          finishedAt: new Date(),
+          error: `${draftCount} unreviewed AI drafts pending`,
+        },
+      });
+      return { kind: "cap" as const, draftCount };
+    }
+
+    const run = await tx.generationRun.create({
+      data: { status: "running" },
+    });
+    return { kind: "claimed" as const, run };
   });
 
-  if (!options.force && draftCount >= MAX_AUTO_DRAFTS) {
-    await prisma.generationRun.create({
-      data: {
-        status: "skipped_cap",
-        finishedAt: new Date(),
-        error: `${draftCount} unreviewed AI drafts pending`,
-      },
-    });
+  if (claim.kind === "running") {
     return {
       status: "skipped",
-      reason: "draft_cap",
-      drafts: draftCount,
-      detail: `${draftCount} unreviewed AI drafts pending; publish or delete them to resume generation`,
+      reason: "already_running",
+      detail: `Another generation run started at ${claim.startedAt.toISOString()}; lock window is ${RUNNING_LOCK_MINUTES} minutes`,
     };
   }
 
-  const run = await prisma.generationRun.create({
-    data: { status: "running" },
-  });
+  if (claim.kind === "cap") {
+    return {
+      status: "skipped",
+      reason: "draft_cap",
+      drafts: claim.draftCount,
+      detail: `${claim.draftCount} unreviewed AI drafts pending; publish or delete them to resume generation`,
+    };
+  }
+
+  const { run } = claim;
 
   try {
     const [liveTrends, recentPosts, usedRuns, publishedPosts, searchQueries] =
@@ -680,6 +638,11 @@ export async function runBlogGeneration(
 
     const { chain } = await getGenerationSettings();
     const modelChain = chain.length > 0 ? chain : DEFAULT_GENERATION_CHAIN;
+    let generated: {
+      model: GoModel;
+      draft: ValidatedDraft;
+      result: ChatCompletionResult;
+    } | null = null;
 
     for (const selection of modelChain) {
       if (Date.now() - startedAt > MAX_TOTAL_GENERATION_MS) {
@@ -711,11 +674,28 @@ export async function runBlogGeneration(
           startedAt + MAX_TOTAL_GENERATION_MS,
           forcedKeyword,
         );
+        generated = { model, draft, result };
+        break;
+      } catch (error) {
+        lastError = error;
+        lastModel = model.id;
+        const message =
+          error instanceof Error ? error.message : "Unknown model error";
+        modelErrors.push(`${model.id}: ${message}`);
+        structuredErrors.push({ model: model.id, message });
+      }
+    }
 
-        const slug = await ensureUniqueSlug(draft.slug);
-        const readTime = `${Math.max(1, Math.round(draft.wordCount / 200))} min read`;
+    if (generated) {
+      // Persistence is not a model failure: if it throws, the outer catch
+      // fails the run instead of falling through to the next model and
+      // generating a second article.
+      const { model, draft, result } = generated;
+      const slug = await ensureUniqueSlug(draft.slug);
+      const readTime = `${Math.max(1, Math.round(draft.wordCount / 200))} min read`;
 
-        const post = await prisma.post.create({
+      const post = await prisma.$transaction(async (tx) => {
+        const created = await tx.post.create({
           data: {
             title: draft.title,
             slug,
@@ -733,48 +713,40 @@ export async function runBlogGeneration(
         });
 
         if (options.keywordId && forcedKeyword) {
-          await prisma.keyword.update({
+          // updateMany: a keyword deleted mid-run must not roll back the draft.
+          await tx.keyword.updateMany({
             where: { id: options.keywordId },
-            data: { status: "used", postId: post.id, usedAt: new Date() },
+            data: { status: "used", postId: created.id, usedAt: new Date() },
           });
         }
 
-        await prisma.generationRun
-          .update({
-            where: { id: run.id },
-            data: {
-              status: "success",
-              finishedAt: new Date(),
-              model: model.id,
-              topic: forcedKeyword ?? draft.topic,
-              postId: post.id,
-              cost: result.cost ?? null,
-              inputTokens: result.inputTokens ?? null,
-              outputTokens: result.outputTokens ?? null,
-            },
-          })
-          .catch((error) => {
-            console.error("Failed to record generation run telemetry:", error);
-          });
+        await tx.generationRun.update({
+          where: { id: run.id },
+          data: {
+            status: "success",
+            finishedAt: new Date(),
+            model: model.id,
+            topic: forcedKeyword ?? draft.topic,
+            postId: created.id,
+            cost: result.cost ?? null,
+            inputTokens: result.inputTokens ?? null,
+            outputTokens: result.outputTokens ?? null,
+          },
+        });
 
-        return {
-          status: "success",
-          postId: post.id,
-          slug,
-          model: model.id,
-          topic: forcedKeyword ?? draft.topic,
-          primaryKeyword: draft.primaryKeyword,
-          wordCount: draft.wordCount,
-          cost: result.cost,
-        };
-      } catch (error) {
-        lastError = error;
-        lastModel = model.id;
-        const message =
-          error instanceof Error ? error.message : "Unknown model error";
-        modelErrors.push(`${model.id}: ${message}`);
-        structuredErrors.push({ model: model.id, message });
-      }
+        return created;
+      });
+
+      return {
+        status: "success",
+        postId: post.id,
+        slug,
+        model: model.id,
+        topic: forcedKeyword ?? draft.topic,
+        primaryKeyword: draft.primaryKeyword,
+        wordCount: draft.wordCount,
+        cost: result.cost,
+      };
     }
 
     const message =
@@ -808,7 +780,9 @@ export async function runBlogGeneration(
           error: message.slice(0, 2000),
         },
       })
-      .catch(() => undefined);
+      .catch((updateError) => {
+        console.error("Failed to mark generation run as failed:", updateError);
+      });
 
     return { status: "failed", error: message };
   }

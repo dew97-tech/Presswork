@@ -5,6 +5,8 @@ import { sweepOrphanedBlobs } from "@/app/lib/blob";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
+// Leave headroom under maxDuration so the response is sent before the kill.
+const SWEEP_DEADLINE_MS = 285_000;
 
 function safeEqual(a: string, b: string): boolean {
   const left = Buffer.from(a);
@@ -14,6 +16,7 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 export async function GET(request: NextRequest) {
+  const requestStartedAt = Date.now();
   const cronSecret = process.env.CRON_SECRET;
 
   if (!cronSecret) {
@@ -32,7 +35,9 @@ export async function GET(request: NextRequest) {
 
   try {
     const result = await runBlogGeneration({ force });
-    const swept = await sweepOrphanedBlobs();
+    const swept = await sweepOrphanedBlobs({
+      deadline: requestStartedAt + SWEEP_DEADLINE_MS,
+    });
 
     if (result.status === "skipped" && result.reason === "already_running") {
       return NextResponse.json(result, { status: 409 });

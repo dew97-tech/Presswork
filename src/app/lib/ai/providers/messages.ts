@@ -31,6 +31,7 @@ export const messagesProvider: Provider = async ({
   maxTokens = 6000,
   reasoningEffort,
   timeoutMs = DEFAULT_TIMEOUT_MS,
+  signal,
 }): Promise<ModelCallResult> => {
   const system = messages
     .filter((message) => message.role === "system")
@@ -69,6 +70,7 @@ export const messagesProvider: Provider = async ({
       path: "/messages",
       sessionId,
       timeoutMs,
+      signal,
       body,
       extraHeaders,
     });

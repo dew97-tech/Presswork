@@ -1,5 +1,5 @@
 import { extractFaq } from "@/app/lib/faq";
-import { sanitizeGeneratedHtml } from "@/app/lib/ai/generate-blog";
+import { sanitizeArticleHtml } from "@/app/lib/article-content";
 import prisma from "@/app/lib/prisma";
 import { publishedDate } from "@/app/lib/post-dates";
 import { getSiteUrl } from "@/app/lib/site";
@@ -79,7 +79,7 @@ export async function generateMetadata({
 
 function cleanArticleContent(rawHtml: string): string {
   if (!rawHtml) return "";
-  return sanitizeGeneratedHtml(rawHtml);
+  return sanitizeArticleHtml(rawHtml);
 }
 
 function formatDate(value: Date): string {
