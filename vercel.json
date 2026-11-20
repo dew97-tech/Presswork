@@ -2,11 +2,5 @@
   "buildCommand": "prisma generate && prisma migrate deploy && next build",
   "installCommand": "npm install",
   "framework": "nextjs",
-  "regions": ["sin1"],
-  "crons": [
-    {
-      "path": "/api/cron/generate-blog",
-      "schedule": "0 6 * * *"
-    }
-  ]
+  "regions": ["sin1"]
 }

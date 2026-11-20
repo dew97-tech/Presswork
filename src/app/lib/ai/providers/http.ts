@@ -15,8 +15,10 @@ export async function sendGoRequest(params: {
   body: Record<string, unknown>;
   sessionId: string;
   timeoutMs: number;
+  signal?: AbortSignal;
   extraHeaders?: Record<string, string>;
 }): Promise<Response> {
+  const timeout = AbortSignal.timeout(params.timeoutMs);
   return fetch(`${GO_BASE_URL}${params.path}`, {
     method: "POST",
     headers: {
@@ -28,7 +30,7 @@ export async function sendGoRequest(params: {
     },
     body: JSON.stringify(params.body),
     cache: "no-store",
-    signal: AbortSignal.timeout(params.timeoutMs),
+    signal: params.signal ? AbortSignal.any([timeout, params.signal]) : timeout,
   });
 }
 

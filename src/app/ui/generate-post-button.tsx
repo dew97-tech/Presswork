@@ -8,7 +8,11 @@ import { useToast } from "@/components/ui/toast";
 import { CircleNotch, Sparkle } from "@phosphor-icons/react";
 import { useActionState, useEffect, useRef } from "react";
 
-export default function GeneratePostButton() {
+export default function GeneratePostButton({
+  aiConfigured,
+}: {
+  aiConfigured: boolean;
+}) {
   const [state, formAction, pending] = useActionState<
     GenerationActionState | null,
     FormData
@@ -50,8 +54,12 @@ export default function GeneratePostButton() {
     <form action={formAction}>
       <button
         type="submit"
-        disabled={pending}
-        title="Generate an AI draft now, ignoring the draft cap"
+        disabled={pending || !aiConfigured}
+        title={
+          aiConfigured
+            ? "Generate an AI draft now, ignoring the draft cap"
+            : "AI is paused: no model API key is configured"
+        }
         className="inline-flex h-11 items-center gap-1.5 rounded border border-border px-4 text-sm text-ink-muted transition-colors hover:border-primary/40 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
       >
         {pending ? (

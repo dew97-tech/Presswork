@@ -214,6 +214,7 @@ function formatExportRows(
 export async function runSearchAnalysis(
   range: GscDateRange,
 ): Promise<AnalysisRunResult> {
+  const startedAt = Date.now();
   const previous = previousRange(range);
 
   const [
@@ -476,6 +477,8 @@ Set "page" to the exact page URL the recommendation targets, or null for a conte
     reasoningEffort: settings.reasoningEffort,
     timeoutMs: 120_000,
     jsonMode: true,
+    // Stay inside the 300s maxDuration of the page invoking this action.
+    deadline: startedAt + 270_000,
   });
 
   const parsed = analysisSchema.safeParse(extractJsonObject(result.content));

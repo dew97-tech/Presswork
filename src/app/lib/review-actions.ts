@@ -5,8 +5,8 @@ import { z } from "zod";
 import {
   countWords,
   normalizeDashes,
-  sanitizeGeneratedHtml,
-} from "@/app/lib/ai/generate-blog";
+  sanitizeArticleHtml,
+} from "@/app/lib/article-content";
 import {
   getStoredReview,
   runArticleReview,
@@ -15,6 +15,7 @@ import {
 import { revalidatePostSurfaces } from "@/app/lib/post-revalidate";
 import { markKeywordsUsedForPost } from "@/app/lib/keyword-usage";
 import prisma from "@/app/lib/prisma";
+import { AI_PAUSED_MESSAGE, isAiConfigured } from "@/app/lib/ai/availability";
 import { auth } from "@/auth";
 import { revalidatePath } from "next/cache";
 
@@ -27,6 +28,8 @@ export type ReviewActionResult =
   | { ok: false; error: string };
 
 export type ApplyReviewResult = { ok: true } | { ok: false; error: string };
+
+class ApplyReviewConflict extends Error {}
 
 async function requireAdmin(): Promise<boolean> {
   const session = await auth();
@@ -43,6 +46,10 @@ export async function reviewArticle(
 
   if (!postId) {
     return { ok: false, error: "Missing post id." };
+  }
+
+  if (!isAiConfigured()) {
+    return { ok: false, error: AI_PAUSED_MESSAGE };
   }
 
   try {
@@ -93,7 +100,7 @@ export async function applyReview(
     content?: string;
   };
 
-  const data: Prisma.PostUpdateInput = {};
+  const data: Prisma.PostUpdateManyMutationInput = {};
 
   if (parsedFields.data.includes("title") && suggested.title) {
     data.title = suggested.title;
@@ -104,7 +111,7 @@ export async function applyReview(
   }
 
   if (parsedFields.data.includes("content") && suggested.content) {
-    const content = sanitizeGeneratedHtml(
+    const content = sanitizeArticleHtml(
       normalizeDashes(suggested.content),
     );
     if (countWords(content) < 300) {
@@ -123,19 +130,47 @@ export async function applyReview(
     };
   }
 
-  const post = await prisma.post.update({
-    where: { id: review.postId },
-    data,
-  });
+  let slug: string;
+  try {
+    slug = await prisma.$transaction(async (tx) => {
+      // Claim the review first so a double submit applies it only once.
+      const claimed = await tx.articleReview.updateMany({
+        where: { id: reviewId, status: "completed" },
+        data: { status: "applied", appliedAt: new Date() },
+      });
+      if (claimed.count === 0) {
+        throw new ApplyReviewConflict(
+          "This review was already applied or discarded.",
+        );
+      }
 
-  await markKeywordsUsedForPost(post.id);
+      // Only overwrite the version the review actually read.
+      const updated = await tx.post.updateMany({
+        where: { id: review.postId, updatedAt: { lte: review.createdAt } },
+        data,
+      });
+      if (updated.count === 0) {
+        throw new ApplyReviewConflict(
+          "The article changed after this review ran. Run a new review before applying its suggestions.",
+        );
+      }
 
-  await prisma.articleReview.update({
-    where: { id: reviewId },
-    data: { status: "applied", appliedAt: new Date() },
-  });
+      const post = await tx.post.findUniqueOrThrow({
+        where: { id: review.postId },
+        select: { slug: true },
+      });
+      return post.slug;
+    });
+  } catch (error) {
+    if (error instanceof ApplyReviewConflict) {
+      return { ok: false, error: error.message };
+    }
+    throw error;
+  }
 
-  revalidatePostSurfaces(post.slug);
+  await markKeywordsUsedForPost(review.postId);
+
+  revalidatePostSurfaces(slug);
   revalidatePath("/admin/search-console");
   revalidatePath(`/admin/edit/${review.postId}`);
   return { ok: true };
@@ -148,16 +183,15 @@ export async function discardReview(
     return { ok: false };
   }
 
-  await prisma.articleReview
-    .update({
-      where: { id: reviewId },
-      data: { status: "discarded" },
-    })
-    .catch(() => undefined);
+  // Never turn an applied review back into a discarded one.
+  const result = await prisma.articleReview.updateMany({
+    where: { id: reviewId, status: { in: ["completed", "failed"] } },
+    data: { status: "discarded" },
+  });
 
   revalidatePath("/admin");
   revalidatePath("/admin/search-console");
-  return { ok: true };
+  return { ok: result.count > 0 };
 }
 
 export async function getReview(

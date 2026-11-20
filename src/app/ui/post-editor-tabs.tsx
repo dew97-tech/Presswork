@@ -15,6 +15,7 @@ export default function PostEditorTabs({
   initialHistory,
   reviewModelLabel,
   webSearchConfigured,
+  aiConfigured,
   initialTab = "write",
   initialFocus = null,
   initialReview = null,
@@ -25,6 +26,7 @@ export default function PostEditorTabs({
   initialHistory: ReviewHistoryItem[];
   reviewModelLabel: string;
   webSearchConfigured: boolean;
+  aiConfigured: boolean;
   initialTab?: "write" | "review";
   initialFocus?: ReviewFocus | null;
   initialReview?: ReviewResult | null;
@@ -103,6 +105,7 @@ export default function PostEditorTabs({
           initialHistory={initialHistory}
           reviewModelLabel={reviewModelLabel}
           webSearchConfigured={webSearchConfigured}
+          aiConfigured={aiConfigured}
           initialFocus={initialFocus}
           initialReview={initialReview}
           autoStart={autoStart}

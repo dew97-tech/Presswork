@@ -1,6 +1,7 @@
 "use server";
 
 import { auth } from "@/auth";
+import { AI_PAUSED_MESSAGE, isAiConfigured } from "@/app/lib/ai/availability";
 import { runSearchAnalysis, type AnalysisBody } from "@/app/lib/google/analysis";
 import { GscAuthError, GscNotConnectedError } from "@/app/lib/google/errors";
 import { inspectUrl, isGscConnected } from "@/app/lib/google/search-console";
@@ -45,7 +46,7 @@ export async function syncIndexStatus(): Promise<SyncIndexResult> {
   const posts = await prisma.post.findMany({
     where: { published: true },
     orderBy: { publishedAt: "desc" },
-    select: { id: true, slug: true },
+    select: { id: true, slug: true, updatedAt: true },
   });
 
   let indexed = 0;
@@ -74,6 +75,9 @@ export async function syncIndexStatus(): Promise<SyncIndexResult> {
             ...(result.lastCrawlTime
               ? { indexedAt: new Date(result.lastCrawlTime) }
               : {}),
+            // Index bookkeeping is not an edit: keep updatedAt, which drives
+            // the public "Updated" date, dateModified and sitemap lastmod.
+            updatedAt: post.updatedAt,
           },
         });
 
@@ -158,6 +162,10 @@ export async function analyzeSearchPerformance(range: {
 
   if (!(await isGscConnected())) {
     return { ok: false, error: "Connect a Google account in settings first." };
+  }
+
+  if (!isAiConfigured()) {
+    return { ok: false, error: AI_PAUSED_MESSAGE };
   }
 
   if (

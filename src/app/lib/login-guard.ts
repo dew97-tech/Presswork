@@ -35,26 +35,35 @@ export async function loginBlockedUntil(key: string): Promise<Date | null> {
 
 export async function registerLoginFailure(key: string): Promise<void> {
   const now = new Date();
-  const existing = await prisma.loginAttempt.findUnique({ where: { key } });
+  const windowCutoff = new Date(now.getTime() - WINDOW_MS);
 
-  if (!existing || now.getTime() - existing.windowStart.getTime() > WINDOW_MS) {
-    await prisma.loginAttempt.upsert({
-      where: { key },
-      create: { key, count: 1, windowStart: now },
-      update: { count: 1, windowStart: now, blockedUntil: null },
-    });
-    return;
+  // Increment in a single statement so parallel failures cannot read the
+  // same count and undercount past MAX_ATTEMPTS.
+  const incremented = await prisma.loginAttempt.updateMany({
+    where: { key, windowStart: { gte: windowCutoff } },
+    data: { count: { increment: 1 } },
+  });
+
+  if (incremented.count === 0) {
+    try {
+      await prisma.loginAttempt.upsert({
+        where: { key },
+        create: { key, count: 1, windowStart: now },
+        update: { count: 1, windowStart: now, blockedUntil: null },
+      });
+      return;
+    } catch {
+      // A concurrent failure created the row first; count this one against it.
+      await prisma.loginAttempt.updateMany({
+        where: { key },
+        data: { count: { increment: 1 } },
+      });
+    }
   }
 
-  const count = existing.count + 1;
-  await prisma.loginAttempt.update({
-    where: { key },
-    data: {
-      count,
-      ...(count >= MAX_ATTEMPTS
-        ? { blockedUntil: new Date(now.getTime() + BLOCK_MS) }
-        : {}),
-    },
+  await prisma.loginAttempt.updateMany({
+    where: { key, count: { gte: MAX_ATTEMPTS } },
+    data: { blockedUntil: new Date(now.getTime() + BLOCK_MS) },
   });
 }
 

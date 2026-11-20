@@ -36,6 +36,7 @@ import {
   CaretRight,
   WarningCircle,
 } from "@phosphor-icons/react/ssr";
+import { isAiConfigured } from "@/app/lib/ai/availability";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
@@ -1063,6 +1064,7 @@ export default async function SearchConsolePage({
             }}
             publishedPosts={publishedPosts}
             feedbackReviews={feedbackReviews}
+            aiConfigured={isAiConfigured()}
           />
 
           <PerformanceImportPanel

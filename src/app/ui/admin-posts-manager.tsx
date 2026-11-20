@@ -28,9 +28,11 @@ interface PostItem {
 export default function AdminPostsManager({
   initialPosts,
   maxAutoDrafts,
+  aiConfigured,
 }: {
   initialPosts: PostItem[];
   maxAutoDrafts: number;
+  aiConfigured: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "published" | "draft">("all");
@@ -86,7 +88,7 @@ export default function AdminPostsManager({
         </div>
 
         <div className="flex items-center gap-2">
-          <GeneratePostButton />
+          <GeneratePostButton aiConfigured={aiConfigured} />
 
           <Link
             href="/admin/new"

@@ -18,6 +18,7 @@ import {
 import { auth } from "@/auth";
 import { deleteBlobIfUnused } from "@/app/lib/blob";
 import { Prisma } from "@prisma/client";
+import { normalizeDashes } from "@/app/lib/article-content";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
@@ -34,17 +35,6 @@ const PostSchema = z.object({
     z.boolean(),
   ),
 });
-
-const EM_DASH = String.fromCharCode(0x2014);
-const EN_DASH = String.fromCharCode(0x2013);
-
-function normalizeDashes(text: string) {
-  return text
-    .replaceAll(` ${EM_DASH} `, ", ")
-    .replaceAll(` ${EN_DASH} `, ", ")
-    .replaceAll(EM_DASH, "-")
-    .replaceAll(EN_DASH, "-");
-}
 
 type PostFormState =
   | {

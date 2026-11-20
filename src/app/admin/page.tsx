@@ -1,3 +1,4 @@
+import { isAiConfigured } from "@/app/lib/ai/availability";
 import { MAX_AUTO_DRAFTS } from "@/app/lib/ai/constants";
 import prisma from "@/app/lib/prisma";
 import AdminPostsManager from "@/app/ui/admin-posts-manager";
@@ -29,6 +30,7 @@ export default async function AdminPage() {
     <div className="w-full">
       <AdminPostsManager
         maxAutoDrafts={MAX_AUTO_DRAFTS}
+        aiConfigured={isAiConfigured()}
         initialPosts={posts.map((p) => ({
           id: p.id,
           slug: p.slug,
