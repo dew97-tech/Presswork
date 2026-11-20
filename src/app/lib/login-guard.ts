@@ -37,34 +37,28 @@ export async function registerLoginFailure(key: string): Promise<void> {
   const now = new Date();
   const windowCutoff = new Date(now.getTime() - WINDOW_MS);
 
-  // Increment in a single statement so parallel failures cannot read the
-  // same count and undercount past MAX_ATTEMPTS.
-  const incremented = await prisma.loginAttempt.updateMany({
-    where: { key, windowStart: { gte: windowCutoff } },
-    data: { count: { increment: 1 } },
-  });
+  // One atomic statement: start a new window or increment the current one.
+  // Separate read/reset steps undercount when failures arrive in parallel.
+  const [row] = await prisma.$queryRaw<{ count: number }[]>`
+    INSERT INTO "LoginAttempt" ("key", "count", "windowStart", "updatedAt")
+    VALUES (${key}, 1, ${now}, ${now})
+    ON CONFLICT ("key") DO UPDATE SET
+      "count" = CASE WHEN "LoginAttempt"."windowStart" < ${windowCutoff}
+        THEN 1 ELSE "LoginAttempt"."count" + 1 END,
+      "blockedUntil" = CASE WHEN "LoginAttempt"."windowStart" < ${windowCutoff}
+        THEN NULL ELSE "LoginAttempt"."blockedUntil" END,
+      "windowStart" = CASE WHEN "LoginAttempt"."windowStart" < ${windowCutoff}
+        THEN ${now} ELSE "LoginAttempt"."windowStart" END,
+      "updatedAt" = ${now}
+    RETURNING "count"
+  `;
 
-  if (incremented.count === 0) {
-    try {
-      await prisma.loginAttempt.upsert({
-        where: { key },
-        create: { key, count: 1, windowStart: now },
-        update: { count: 1, windowStart: now, blockedUntil: null },
-      });
-      return;
-    } catch {
-      // A concurrent failure created the row first; count this one against it.
-      await prisma.loginAttempt.updateMany({
-        where: { key },
-        data: { count: { increment: 1 } },
-      });
-    }
+  if (row && row.count >= MAX_ATTEMPTS) {
+    await prisma.loginAttempt.update({
+      where: { key },
+      data: { blockedUntil: new Date(now.getTime() + BLOCK_MS) },
+    });
   }
-
-  await prisma.loginAttempt.updateMany({
-    where: { key, count: { gte: MAX_ATTEMPTS } },
-    data: { blockedUntil: new Date(now.getTime() + BLOCK_MS) },
-  });
 }
 
 export async function clearLoginFailures(key: string): Promise<void> {
